@@ -13,6 +13,7 @@
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/vmalloc.h>
+#include <linux/version.h>
 
 #include "octep_config.h"
 #include "octep_main.h"
@@ -806,7 +807,11 @@ static void octep_tx_timeout_task(struct work_struct *work)
  *
  * Schedule a work to handle Tx queue timeout.
  */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
+static void octep_tx_timeout(struct net_device *netdev)
+#else
 static void octep_tx_timeout(struct net_device *netdev, unsigned int txqueue)
+#endif
 {
 	struct octep_device *oct = netdev_priv(netdev);
 
@@ -827,7 +832,11 @@ static int octep_set_mac(struct net_device *netdev, void *p)
 		return err;
 
 	memcpy(oct->mac_addr, addr->sa_data, ETH_ALEN);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+	ether_addr_copy(netdev->dev_addr, addr->sa_data);
+#else
 	eth_hw_addr_set(netdev, addr->sa_data);
+#endif
 
 	return 0;
 }
@@ -1067,7 +1076,12 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev->mtu = OCTEP_DEFAULT_MTU;
 
 	octep_get_mac_addr(octep_dev, octep_dev->mac_addr);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+	ether_addr_copy(netdev->dev_addr, octep_dev->mac_addr);
+	ether_addr_copy(netdev->perm_addr, octep_dev->mac_addr);
+#else
 	eth_hw_addr_set(netdev, octep_dev->mac_addr);
+#endif
 
 	err = register_netdev(netdev);
 	if (err) {
