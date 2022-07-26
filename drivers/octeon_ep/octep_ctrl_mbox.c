@@ -20,7 +20,7 @@
 #include "octep_main.h"
 
 /* Timeout in msecs for message response */
-#define OCTEP_CTRL_MBOX_MSG_TIMEOUT_MS			100
+#define OCTEP_CTRL_MBOX_MSG_TIMEOUT_MS			1500
 /* Time in msecs to wait for message response */
 #define OCTEP_CTRL_MBOX_MSG_WAIT_MS			10
 
@@ -43,8 +43,7 @@
 #define OCTEP_CTRL_MBOX_F2HQ_ELEM_SZ_OFFSET(m)		((OCTEP_CTRL_MBOX_F2HQ_INFO_OFFSET(m)) + 8)
 #define OCTEP_CTRL_MBOX_F2HQ_ELEM_CNT_OFFSET(m)		((OCTEP_CTRL_MBOX_F2HQ_INFO_OFFSET(m)) + 12)
 
-#define OCTEP_CTRL_MBOX_Q_OFFSET(m, i)			((m) + \
-							 (sizeof(struct octep_ctrl_mbox_msg) * (i)))
+#define OCTEP_CTRL_MBOX_Q_OFFSET(q, i)			((q->hw_q) + (q->elem_sz * i))
 
 static u32 octep_ctrl_mbox_circq_inc(u32 index, u32 mask)
 {
@@ -108,9 +107,8 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 
 	mbox->f2hq.hw_prod = OCTEP_CTRL_MBOX_F2HQ_PROD_OFFSET(mbox->barmem);
 	mbox->f2hq.hw_cons = OCTEP_CTRL_MBOX_F2HQ_CONS_OFFSET(mbox->barmem);
-	mbox->f2hq.hw_q = mbox->h2fq.hw_q +
-			  ((mbox->h2fq.elem_sz + sizeof(union octep_ctrl_mbox_msg_hdr)) *
-			   mbox->h2fq.elem_cnt);
+	mbox->f2hq.hw_q = (mbox->h2fq.hw_q +
+			   (mbox->h2fq.elem_sz * mbox->h2fq.elem_cnt));
 
 	/* ensure ready state is seen after everything is initialized */
 	wmb();
@@ -142,7 +140,7 @@ int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_ms
 	if (!octep_ctrl_mbox_circq_space(pi, ci, q->mask))
 		return -ENOMEM;
 
-	qidx = OCTEP_CTRL_MBOX_Q_OFFSET(q->hw_q, pi);
+	qidx = OCTEP_CTRL_MBOX_Q_OFFSET(q, pi);
 	mbuf = (u64 *)msg->msg;
 	word0 = &msg->hdr.word0;
 
@@ -196,7 +194,7 @@ int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_ms
 	if (!count)
 		return -EAGAIN;
 
-	qidx = OCTEP_CTRL_MBOX_Q_OFFSET(q->hw_q, ci);
+	qidx = OCTEP_CTRL_MBOX_Q_OFFSET(q, ci);
 	mbuf = (u64 *)msg->msg;
 
 	mutex_lock(&mbox->f2hq_lock);
