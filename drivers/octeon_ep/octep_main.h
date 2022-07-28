@@ -44,6 +44,7 @@
 #define  OCTEP_OQ_INTR_RESEND_BIT  59
 
 #define  OCTEP_MMIO_REGIONS     3
+
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
  * Octeon gets mapped to different physical address spaces in
@@ -97,28 +98,27 @@ struct octep_mbox_data {
 	u64 *data;
 };
 
+#define MAX_VF_PF_MBOX_DATA_SIZE 256
+/* wrappers around work structs */
+struct octep_vf_mbox_wk {
+	struct work_struct work;
+	void *ctxptr;
+	u64 ctxul;
+};
+
 /* Octeon device mailbox */
 struct octep_mbox {
-	/* A spinlock to protect access to this q_mbox. */
-	spinlock_t lock;
-
-	u32 q_no;
-	u32 state;
-
-	/* SLI_MAC_PF_MBOX_INT for PF, SLI_PKT_MBOX_INT for VF. */
-	u8 __iomem *mbox_int_reg;
-
-	/* SLI_PKT_PF_VF_MBOX_SIG(0) for PF,
-	 * SLI_PKT_PF_VF_MBOX_SIG(1) for VF.
-	 */
-	u8 __iomem *mbox_write_reg;
-
-	/* SLI_PKT_PF_VF_MBOX_SIG(1) for PF,
-	 * SLI_PKT_PF_VF_MBOX_SIG(0) for VF.
-	 */
-	u8 __iomem *mbox_read_reg;
-
+	/* A mutex to protect access to this q_mbox. */
+	struct mutex lock;
+	u32 vf_id;
+	u32 config_data_index;
+	u32 message_len;
+	u8 __iomem *pf_vf_data_reg;
+	u8 __iomem *vf_pf_data_reg;
+	struct octep_vf_mbox_wk wk;
+	struct octep_device *oct;
 	struct octep_mbox_data mbox_data;
+	u8 config_data[MAX_VF_PF_MBOX_DATA_SIZE];
 };
 
 /* Tx/Rx queue vector per interrupt. */
@@ -194,6 +194,11 @@ struct octep_iface_link_info {
 
 	/* Operational state of the link: physical link is up down */
 	u8  oper_up;
+};
+
+/* The Octeon VF device specific info data structure.*/
+struct octep_vf_info {
+	u8 mac_addr[ETH_ALEN];
 };
 
 /* The Octeon device specific private data structure.
@@ -274,6 +279,9 @@ struct octep_device {
 
 	/* Work entry to handle ctrl mbox interrupt */
 	struct work_struct ctrl_mbox_task;
+
+	/* VFs info */
+	struct octep_vf_info vf_info[OCTEP_MAX_VF];
 
 };
 

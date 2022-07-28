@@ -18,6 +18,7 @@
 #include "octep_config.h"
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
+#include "octep_pfvf_mbox.h"
 
 struct workqueue_struct *octep_wq;
 
@@ -1106,6 +1107,12 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto register_dev_err;
 	}
 	dev_info(&pdev->dev, "Device probe successful\n");
+
+	err = octep_setup_vf_mbox(octep_dev);
+	if (err) {
+		dev_err(&pdev->dev, "OCTEON: Mailbox setup failed\n");
+		goto register_dev_err;
+	}
 	return 0;
 
 register_dev_err:
@@ -1137,9 +1144,12 @@ static void octep_remove(struct pci_dev *pdev)
 	if (!oct)
 		return;
 
+	octep_delete_vf_mbox(oct);
+
 	cancel_work_sync(&oct->tx_timeout_task);
 	cancel_work_sync(&oct->ctrl_mbox_task);
 	netdev = oct->netdev;
+
 	if (netdev->reg_state == NETREG_REGISTERED)
 		unregister_netdev(netdev);
 
@@ -1172,11 +1182,10 @@ int octep_sriov_enable(struct octep_device *oct, int num_vfs)
 
 	err = pci_enable_sriov(pdev, num_vfs);
 	if (err) {
-		dev_warn(&pdev->dev, "Octeon: Failed to enable SRIOV; err=%d\n", err);
+		dev_warn(&pdev->dev, "Failed to enable SRIOV err=%d\n", err);
 		return err;
 	}
-	else
-		CFG_GET_ACTIVE_VFS(oct->conf) = num_vfs;
+	CFG_GET_ACTIVE_VFS(oct->conf) = num_vfs;
 
 	return num_vfs;
 }
@@ -1186,13 +1195,14 @@ int octep_sriov_configure(struct pci_dev *pdev, int num_vfs)
 	struct octep_device *oct = pci_get_drvdata(pdev);
 	int max_nvfs;
 
-	if(num_vfs == 0)
+	if (num_vfs == 0)
 		return octep_sriov_disable(oct);
 
 	max_nvfs = CFG_GET_MAX_VFS(oct->conf);
 
 	if (num_vfs > max_nvfs) {
-		dev_err(&pdev->dev, "Invalid VF count; Max supported VFs = %d\n", max_nvfs);
+		dev_err(&pdev->dev, "Invalid VF count Max supported VFs = %d\n",
+			max_nvfs);
 		return -EINVAL;
 	}
 
