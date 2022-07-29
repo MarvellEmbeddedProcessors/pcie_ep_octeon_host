@@ -735,3 +735,13 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 	octep_init_config_cn93_pf(oct);
 	octep_configure_ring_mapping_cn93_pf(oct);
 }
+
+void octep_device_setup_cnf95o_pf(struct octep_device *oct)
+{
+	octep_device_setup_cn93_pf(oct);
+}
+
+void octep_device_setup_cnf95n_pf(struct octep_device *oct)
+{
+	octep_device_setup_cn93_pf(oct);
+}
