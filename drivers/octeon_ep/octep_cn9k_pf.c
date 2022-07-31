@@ -447,7 +447,7 @@ static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 	reg_val = octep_read_csr64(oct, CN93_SDP_EPF_OEI_RINT);
 	if (reg_val) {
 		dev_info(&pdev->dev,
-			 "Received OEI_EINT intr: 0x%llx\n", reg_val);
+			 "Received OEI_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT, reg_val);
 		queue_work(octep_wq, &oct->ctrl_mbox_task);
 		goto irq_handled;
