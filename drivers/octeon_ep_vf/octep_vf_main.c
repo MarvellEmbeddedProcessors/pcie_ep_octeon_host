@@ -736,8 +736,8 @@ static int octep_vf_get_if_stats(struct octep_vf_device *oct)
 static void octep_vf_get_stats64(struct net_device *netdev,
 			      struct rtnl_link_stats64 *stats)
 {
-	u64 tx_packets, tx_bytes, rx_packets, rx_bytes;
 	struct octep_vf_device *oct = netdev_priv(netdev);
+	u64 tx_packets, tx_bytes, rx_packets, rx_bytes;
 	int q;
 
 	octep_vf_get_if_stats(oct);

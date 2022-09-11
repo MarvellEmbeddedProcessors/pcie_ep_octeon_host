@@ -133,9 +133,9 @@ octep_vf_get_ethtool_stats(struct net_device *netdev,
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	struct octep_vf_iface_tx_stats *iface_tx_stats;
 	struct octep_vf_iface_rx_stats *iface_rx_stats;
+	u64 rx_alloc_errors, tx_busy_errors;
 	u64 rx_packets, rx_bytes;
 	u64 tx_packets, tx_bytes;
-	u64 rx_alloc_errors, tx_busy_errors;
 	int q, i;
 
 	rx_packets = 0;
