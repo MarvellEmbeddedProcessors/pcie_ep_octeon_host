@@ -100,7 +100,7 @@ struct octep_mbox_data {
 
 #define MAX_VF_PF_MBOX_DATA_SIZE 256
 /* wrappers around work structs */
-struct octep_vf_mbox_wk {
+struct octep_pfvf_mbox_wk {
 	struct work_struct work;
 	void *ctxptr;
 	u64 ctxul;
@@ -115,7 +115,7 @@ struct octep_mbox {
 	u32 message_len;
 	u8 __iomem *pf_vf_data_reg;
 	u8 __iomem *vf_pf_data_reg;
-	struct octep_vf_mbox_wk wk;
+	struct octep_pfvf_mbox_wk wk;
 	struct octep_device *oct;
 	struct octep_mbox_data mbox_data;
 	u8 config_data[MAX_VF_PF_MBOX_DATA_SIZE];
@@ -197,7 +197,7 @@ struct octep_iface_link_info {
 };
 
 /* The Octeon VF device specific info data structure.*/
-struct octep_vf_info {
+struct octep_pfvf_info {
 	u8 mac_addr[ETH_ALEN];
 };
 
@@ -281,7 +281,7 @@ struct octep_device {
 	struct work_struct ctrl_mbox_task;
 
 	/* VFs info */
-	struct octep_vf_info vf_info[OCTEP_MAX_VF];
+	struct octep_pfvf_info vf_info[OCTEP_MAX_VF];
 
 };
 
