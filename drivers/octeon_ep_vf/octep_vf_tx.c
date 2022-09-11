@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/* Marvell Octeon EP (EndPoint) VF Ethernet Driver
  *
  * Copyright (C) 2020 Marvell.
  *
