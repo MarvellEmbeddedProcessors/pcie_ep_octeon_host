@@ -193,6 +193,14 @@ union octep_ctrl_net_f2h_data_sz {
 	struct octep_ctrl_net_f2h_resp f2h_resp;
 };
 
+/* Max data size to be transferred over mbox */
+union octep_ctrl_net_max_data {
+	struct octep_ctrl_net_h2f_req h2f_req;
+	struct octep_ctrl_net_h2f_resp h2f_resp;
+	struct octep_ctrl_net_f2h_req f2h_req;
+	struct octep_ctrl_net_f2h_resp f2h_resp;
+};
+
 /* size of host to fw data in words */
 #define OCTEP_CTRL_NET_H2F_DATA_SZW		((sizeof(union octep_ctrl_net_h2f_data_sz)) / \
 						 (sizeof(unsigned long)))

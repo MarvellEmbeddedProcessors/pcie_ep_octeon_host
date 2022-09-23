@@ -887,23 +887,34 @@ static const struct net_device_ops octep_netdev_ops = {
  **/
 static void octep_ctrl_mbox_task(struct work_struct *work)
 {
+	static uint16_t msg_sz = sizeof(union octep_ctrl_net_max_data);
 	struct octep_device *oct = container_of(work, struct octep_device,
 						ctrl_mbox_task);
 	struct net_device *netdev = oct->netdev;
-	struct octep_ctrl_net_f2h_req req = {};
-	struct octep_ctrl_mbox_msg msg;
-	int ret = 0;
+	union octep_ctrl_net_max_data data = {0};
+	struct octep_ctrl_mbox_msg msg = {0};
+	struct octep_ctrl_net_f2h_req *req;
+	int ret;
 
-	msg.msg = &req;
+	msg.hdr.s.sz = msg_sz;
+	msg.sg_num = 1;
+	msg.sg_list[0].sz = msg_sz;
+	msg.sg_list[0].msg = &data;
 	while (true) {
-		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox, &msg);
-		if (ret)
+		/* mbox will overwrite msg.hdr.s.sz so initialize it */
+		msg.hdr.s.sz = msg_sz;
+		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox,
+					   (struct octep_ctrl_mbox_msg *)&msg,
+					   1);
+		if (ret <= 0 ||
+		    !(msg.hdr.s.flags & OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY))
 			break;
 
-		switch (req.hdr.cmd) {
+		req = (struct octep_ctrl_net_f2h_req *)&data.f2h_req;
+		switch (req->hdr.cmd) {
 		case OCTEP_CTRL_NET_F2H_CMD_LINK_STATUS:
 			if (netif_running(netdev)) {
-				if (req.link.state) {
+				if (req->link.state) {
 					dev_info(&oct->pdev->dev, "netif_carrier_on\n");
 					netif_carrier_on(netdev);
 				} else {
@@ -913,7 +924,7 @@ static void octep_ctrl_mbox_task(struct work_struct *work)
 			}
 			break;
 		default:
-			pr_info("Unknown mbox req : %u\n", req.hdr.cmd);
+			pr_info("Unknown mbox req : %u\n", req->hdr.cmd);
 			break;
 		}
 	}
@@ -987,10 +998,7 @@ int octep_device_setup(struct octep_device *oct)
 		dev_err(&pdev->dev, "Failed to initialize control mbox\n");
 		return -1;
 	}
-	oct->ctrl_mbox_ifstats_offset = OCTEP_CTRL_MBOX_SZ(ctrl_mbox->h2fq.elem_sz,
-							   ctrl_mbox->h2fq.elem_cnt,
-							   ctrl_mbox->f2hq.elem_sz,
-							   ctrl_mbox->f2hq.elem_cnt);
+	oct->ctrl_mbox_ifstats_offset = ctrl_mbox->barmem_sz;
 
 	return 0;
 
