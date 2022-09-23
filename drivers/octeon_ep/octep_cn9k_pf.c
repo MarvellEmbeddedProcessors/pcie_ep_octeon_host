@@ -13,6 +13,10 @@
 #include "octep_main.h"
 #include "octep_regs_cn9k_pf.h"
 
+/* We will support 128 pf's in control mbox */
+#define CTRL_MBOX_MAX_PF	128
+#define CTRL_MBOX_SZ		(size_t)(0x400000 / CTRL_MBOX_MAX_PF)
+
 /* Names of Hardware non-queue generic interrupts */
 static char *cn93_non_ioq_msix_names[] = {
 	"epf_ire_rint",
@@ -199,6 +203,8 @@ static void octep_init_config_cn93_pf(struct octep_device *oct)
 	struct octep_config *conf = oct->conf;
 	struct pci_dev *pdev = oct->pdev;
 	u64 val;
+	int pos;
+	u8 link = 0;
 
 	/* Read ring configuration:
 	 * PF ring count, number of VFs and rings per VF supported
@@ -234,7 +240,16 @@ static void octep_init_config_cn93_pf(struct octep_device *oct)
 	conf->msix_cfg.ioq_msix = conf->pf_ring_cfg.active_io_rings;
 	conf->msix_cfg.non_ioq_msix_names = cn93_non_ioq_msix_names;
 
-	conf->ctrl_mbox_cfg.barmem_addr = (void __iomem *)oct->mmio[2].hw_addr + (0x400000ull * 8);
+	pos = pci_find_ext_capability(oct->pdev, PCI_EXT_CAP_ID_SRIOV);
+	if (pos) {
+		pci_read_config_byte(oct->pdev,
+				     pos + PCI_SRIOV_FUNC_LINK,
+				     &link);
+		link = PCI_DEVFN(PCI_SLOT(oct->pdev->devfn), link);
+	}
+	conf->ctrl_mbox_cfg.barmem_addr = (void __iomem *)oct->mmio[2].hw_addr +
+					   (0x400000ull * 8) +
+					   (link * CTRL_MBOX_SZ);
 }
 
 /* Setup registers for a hardware Tx Queue  */
@@ -461,7 +476,9 @@ static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 		dev_info(&pdev->dev,
 			 "Received OEI_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT, reg_val);
-		queue_work(octep_wq, &oct->ctrl_mbox_task);
+		if (reg_val & CN93_SDP_EPF_OEI_RINT_DATA_BIT_MBOX)
+			queue_work(octep_wq, &oct->ctrl_mbox_task);
+
 		goto irq_handled;
 	}
 
