@@ -8,12 +8,13 @@
 #include <linux/types.h>
 #include <linux/etherdevice.h>
 #include <linux/pci.h>
+#include <linux/wait.h>
 
 #include "octep_config.h"
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
 
-static const uint32_t req_hdr_sz = sizeof(struct octep_ctrl_net_req_hdr);
+static const uint32_t req_hdr_sz = sizeof(union octep_ctrl_net_req_hdr);
 static const uint32_t mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
 static const uint32_t mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
 static const uint32_t state_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_state);
@@ -21,175 +22,334 @@ static const uint32_t link_info_sz = sizeof(struct octep_ctrl_net_link_info);
 static const uint32_t get_stats_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_get_stats);
 
 static void init_send_req(struct octep_ctrl_mbox_msg *msg, void *buf,
-			  uint16_t sz)
+			  uint16_t sz, int vfid)
 {
 	msg->hdr.s.flags = OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ;
 	msg->hdr.s.sz = req_hdr_sz + sz;
 	msg->sg_num = 1;
 	msg->sg_list[0].msg = buf;
 	msg->sg_list[0].sz = msg->hdr.s.sz;
+	if (vfid != OCTEP_CTRL_NET_INVALID_VFID) {
+		msg->hdr.s.is_vf = 1;
+		msg->hdr.s.vf_idx = vfid;
+	}
 }
 
-int octep_get_link_status(struct octep_device *oct)
+static int send_mbox_req(struct octep_device *oct,
+			 struct octep_ctrl_net_wait_data *d,
+			 bool wait_for_response)
 {
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_net_h2f_resp *resp;
-	struct octep_ctrl_mbox_msg msg = {};
-	int err;
+	int err, ret;
 
-	init_send_req(&msg, (void *)&req, state_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_STATUS;
-	req.link.cmd = OCTEP_CTRL_NET_CMD_GET;
+	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &d->msg, 1);
+	if (err < 0)
+		return err;
 
-	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
-	if (err <= 0)
+	if (!wait_for_response)
+		return 0;
+
+	d->done = 0;
+	INIT_LIST_HEAD(&d->list);
+	list_add_tail(&d->list, &oct->ctrl_req_wait_list);
+	ret = wait_event_interruptible_timeout(oct->ctrl_req_wait_q,
+					       (d->done != 0),
+					       jiffies + msecs_to_jiffies(500));
+	list_del(&d->list);
+	if (ret == 0 || ret == 1)
 		return -EAGAIN;
 
-	resp = (struct octep_ctrl_net_h2f_resp *)&req;
-	return resp->link.state;
-}
+	/**
+	 * (ret == 0)  cond = false && timeout, return 0
+	 * (ret < 0) interrupted by signal, return 0
+	 * (ret == 1) cond = true && timeout, return 1
+	 * (ret >= 1) cond = true && !timeout, return 1
+	 */
 
-void octep_set_link_status(struct octep_device *oct, bool up)
-{
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_mbox_msg msg = {};
-
-	init_send_req(&msg, (void *)&req, state_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_STATUS;
-	req.link.cmd = OCTEP_CTRL_NET_CMD_SET;
-	req.link.state = (up) ? OCTEP_CTRL_NET_STATE_UP : OCTEP_CTRL_NET_STATE_DOWN;
-
-	octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
-}
-
-void octep_set_rx_state(struct octep_device *oct, bool up)
-{
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_mbox_msg msg = {};
-
-	init_send_req(&msg, (void *)&req, state_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_RX_STATE;
-	req.link.cmd = OCTEP_CTRL_NET_CMD_SET;
-	req.link.state = (up) ? OCTEP_CTRL_NET_STATE_UP : OCTEP_CTRL_NET_STATE_DOWN;
-
-	octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
-}
-
-int octep_get_mac_addr(struct octep_device *oct, u8 *addr)
-{
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_net_h2f_resp *resp;
-	struct octep_ctrl_mbox_msg msg = {};
-	int err;
-
-	init_send_req(&msg, (void *)&req, mac_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_MAC;
-	req.link.cmd = OCTEP_CTRL_NET_CMD_GET;
-
-	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
-	if (err <= 0)
+	if (d->data.resp.hdr.s.reply != OCTEP_CTRL_NET_REPLY_OK)
 		return -EAGAIN;
 
-	resp = (struct octep_ctrl_net_h2f_resp *)&req;
-	memcpy(addr, resp->mac.addr, ETH_ALEN);
-
 	return 0;
 }
 
-int octep_set_mac_addr(struct octep_device *oct, u8 *addr)
+int octep_ctrl_net_init(struct octep_device *oct)
 {
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_mbox_msg msg = {};
+	struct pci_dev *pdev = oct->pdev;
+	struct octep_ctrl_mbox *ctrl_mbox;
+	int ret;
 
-	init_send_req(&msg, (void *)&req, mac_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_MAC;
-	req.mac.cmd = OCTEP_CTRL_NET_CMD_SET;
-	memcpy(&req.mac.addr, addr, ETH_ALEN);
-	octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
+	init_waitqueue_head(&oct->ctrl_req_wait_q);
+	INIT_LIST_HEAD(&oct->ctrl_req_wait_list);
+
+	/* Initialize control mbox */
+	ctrl_mbox = &oct->ctrl_mbox;
+	ctrl_mbox->barmem = CFG_GET_CTRL_MBOX_MEM_ADDR(oct->conf);
+	ret = octep_ctrl_mbox_init(ctrl_mbox);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to initialize control mbox\n");
+		return ret;
+	}
+	oct->ctrl_mbox_ifstats_offset = ctrl_mbox->barmem_sz;
 
 	return 0;
 }
 
-int octep_set_mtu(struct octep_device *oct, int mtu)
+int octep_ctrl_net_get_link_status(struct octep_device *oct, int vfid)
 {
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_mbox_msg msg = {};
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+	int err;
 
-	init_send_req(&msg, (void *)&req, mtu_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_MTU;
-	req.mtu.cmd = OCTEP_CTRL_NET_CMD_SET;
-	req.mtu.val = mtu;
+	init_send_req(&d.msg, (void *)req, state_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_STATUS;
+	req->link.cmd = OCTEP_CTRL_NET_CMD_GET;
+	err = send_mbox_req(oct, &d, true);
+	if (err < 0)
+		return err;
 
-	octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
+	return d.data.resp.link.state;
+}
+
+int octep_ctrl_net_set_link_status(struct octep_device *oct, int vfid, bool up,
+				   bool wait_for_response)
+{
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+
+	init_send_req(&d.msg, req, state_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_STATUS;
+	req->link.cmd = OCTEP_CTRL_NET_CMD_SET;
+	req->link.state = (up) ? OCTEP_CTRL_NET_STATE_UP :
+				OCTEP_CTRL_NET_STATE_DOWN;
+
+	return send_mbox_req(oct, &d, wait_for_response);
+}
+
+int octep_ctrl_net_set_rx_state(struct octep_device *oct, int vfid, bool up,
+				bool wait_for_response)
+{
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+
+	init_send_req(&d.msg, req, state_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_RX_STATE;
+	req->link.cmd = OCTEP_CTRL_NET_CMD_SET;
+	req->link.state = (up) ? OCTEP_CTRL_NET_STATE_UP :
+				OCTEP_CTRL_NET_STATE_DOWN;
+
+	return send_mbox_req(oct, &d, wait_for_response);
+}
+
+int octep_ctrl_net_get_mac_addr(struct octep_device *oct, int vfid, u8 *addr)
+{
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+	int err;
+
+	init_send_req(&d.msg, req, mac_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_MAC;
+	req->link.cmd = OCTEP_CTRL_NET_CMD_GET;
+	err = send_mbox_req(oct, &d, true);
+	if (err < 0)
+		return err;
+
+	memcpy(addr, d.data.resp.mac.addr, ETH_ALEN);
 
 	return 0;
 }
 
-int octep_get_if_stats(struct octep_device *oct)
+int octep_ctrl_net_set_mac_addr(struct octep_device *oct, int vfid, u8 *addr,
+				bool wait_for_response)
+{
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+
+	init_send_req(&d.msg, req, mac_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_MAC;
+	req->mac.cmd = OCTEP_CTRL_NET_CMD_SET;
+	memcpy(&req->mac.addr, addr, ETH_ALEN);
+
+	return send_mbox_req(oct, &d, wait_for_response);
+}
+
+int octep_ctrl_net_set_mtu(struct octep_device *oct, int vfid, int mtu,
+			   bool wait_for_response)
+{
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+
+	init_send_req(&d.msg, req, mtu_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_MTU;
+	req->mtu.cmd = OCTEP_CTRL_NET_CMD_SET;
+	req->mtu.val = mtu;
+
+	return send_mbox_req(oct, &d, wait_for_response);
+}
+
+int octep_ctrl_net_get_if_stats(struct octep_device *oct, int vfid)
 {
 	void __iomem *iface_rx_stats;
 	void __iomem *iface_tx_stats;
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_mbox_msg msg = {};
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
 	int err;
 
-	init_send_req(&msg, (void *)&req, get_stats_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_GET_IF_STATS;
-	req.mac.cmd = OCTEP_CTRL_NET_CMD_GET;
-	req.get_stats.offset = oct->ctrl_mbox_ifstats_offset;
+	init_send_req(&d.msg, req, get_stats_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_GET_IF_STATS;
+	req->get_stats.offset = oct->ctrl_mbox_ifstats_offset;
+	err = send_mbox_req(oct, &d, true);
+	if (err < 0)
+		return err;
 
-	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
-	if (err <= 0)
-		return -EAGAIN;
-
-	iface_rx_stats = oct->ctrl_mbox.barmem + oct->ctrl_mbox_ifstats_offset;
-	iface_tx_stats = oct->ctrl_mbox.barmem + oct->ctrl_mbox_ifstats_offset +
+	iface_rx_stats = oct->ctrl_mbox.barmem +
+			 oct->ctrl_mbox_ifstats_offset;
+	iface_tx_stats = oct->ctrl_mbox.barmem +
+			 oct->ctrl_mbox_ifstats_offset +
 			 sizeof(struct octep_iface_rx_stats);
-	memcpy_fromio(&oct->iface_rx_stats, iface_rx_stats, sizeof(struct octep_iface_rx_stats));
-	memcpy_fromio(&oct->iface_tx_stats, iface_tx_stats, sizeof(struct octep_iface_tx_stats));
+	memcpy_fromio(&oct->iface_rx_stats,
+		      iface_rx_stats,
+		      sizeof(struct octep_iface_rx_stats));
+	memcpy_fromio(&oct->iface_tx_stats,
+		      iface_tx_stats,
+		      sizeof(struct octep_iface_tx_stats));
 
-	return err;
+	return 0;
 }
 
-int octep_get_link_info(struct octep_device *oct)
+int octep_ctrl_net_get_link_info(struct octep_device *oct, int vfid)
 {
-	struct octep_ctrl_net_h2f_req req = {};
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
 	struct octep_ctrl_net_h2f_resp *resp;
-	struct octep_ctrl_mbox_msg msg = {};
 	int err;
 
-	init_send_req(&msg, (void *)&req, link_info_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_INFO;
-	req.mac.cmd = OCTEP_CTRL_NET_CMD_GET;
+	init_send_req(&d.msg, req, link_info_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_INFO;
+	req->link_info.cmd = OCTEP_CTRL_NET_CMD_GET;
+	err = send_mbox_req(oct, &d, true);
+	if (err < 0)
+		return err;
 
-	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
-	if (err <= 0)
-		return -EAGAIN;
-
-	resp = (struct octep_ctrl_net_h2f_resp *)&req;
+	resp = &d.data.resp;
 	oct->link_info.supported_modes = resp->link_info.supported_modes;
 	oct->link_info.advertised_modes = resp->link_info.advertised_modes;
 	oct->link_info.autoneg = resp->link_info.autoneg;
 	oct->link_info.pause = resp->link_info.pause;
 	oct->link_info.speed = resp->link_info.speed;
 
-	return err;
+	return 0;
 }
 
-int octep_set_link_info(struct octep_device *oct, struct octep_iface_link_info *link_info)
+int octep_ctrl_net_set_link_info(struct octep_device *oct, int vfid,
+				 struct octep_iface_link_info *link_info,
+				 bool wait_for_response)
 {
-	struct octep_ctrl_net_h2f_req req = {};
-	struct octep_ctrl_mbox_msg msg = {};
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
 
-	init_send_req(&msg, (void *)&req, link_info_sz);
-	req.hdr.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_INFO;
-	req.link_info.cmd = OCTEP_CTRL_NET_CMD_SET;
-	req.link_info.info.advertised_modes = link_info->advertised_modes;
-	req.link_info.info.autoneg = link_info->autoneg;
-	req.link_info.info.pause = link_info->pause;
-	req.link_info.info.speed = link_info->speed;
+	init_send_req(&d.msg, req, link_info_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_INFO;
+	req->link_info.cmd = OCTEP_CTRL_NET_CMD_SET;
+	req->link_info.info.advertised_modes = link_info->advertised_modes;
+	req->link_info.info.autoneg = link_info->autoneg;
+	req->link_info.info.pause = link_info->pause;
+	req->link_info.info.speed = link_info->speed;
 
-	octep_ctrl_mbox_send(&oct->ctrl_mbox, &msg, 1);
+	return send_mbox_req(oct, &d, wait_for_response);
+}
+
+static int process_mbox_req(struct octep_device *oct,
+			    struct octep_ctrl_mbox_msg *msg)
+{
+	return 0;
+}
+
+static int process_mbox_resp(struct octep_device *oct,
+			     struct octep_ctrl_mbox_msg *msg)
+{
+	struct octep_ctrl_net_wait_data *pos, *n;
+
+	list_for_each_entry_safe(pos, n, &oct->ctrl_req_wait_list, list) {
+		if (pos->msg.hdr.s.msg_id == msg->hdr.s.msg_id) {
+			memcpy(&pos->data.resp,
+			       msg->sg_list[0].msg,
+			       msg->hdr.s.sz);
+			pos->done = 1;
+			wake_up_interruptible_all(&oct->ctrl_req_wait_q);
+			break;
+		}
+	}
+
+	return 0;
+}
+
+static int process_mbox_notify(struct octep_device *oct,
+			       struct octep_ctrl_mbox_msg *msg)
+{
+	struct octep_ctrl_net_f2h_req *req;
+	struct net_device *netdev = oct->netdev;
+
+	req = (struct octep_ctrl_net_f2h_req *)msg->sg_list[0].msg;
+	switch (req->hdr.s.cmd) {
+	case OCTEP_CTRL_NET_F2H_CMD_LINK_STATUS:
+		if (netif_running(netdev)) {
+			if (req->link.state) {
+				dev_info(&oct->pdev->dev, "netif_carrier_on\n");
+				netif_carrier_on(netdev);
+			} else {
+				dev_info(&oct->pdev->dev, "netif_carrier_off\n");
+				netif_carrier_off(netdev);
+			}
+		}
+		break;
+	default:
+		pr_info("Unknown mbox req : %u\n", req->hdr.s.cmd);
+		break;
+	}
+
+	return 0;
+}
+
+int octep_ctrl_net_recv_fw_messages(struct octep_device *oct)
+{
+	static uint16_t msg_sz = sizeof(union octep_ctrl_net_max_data);
+	union octep_ctrl_net_max_data data = {0};
+	struct octep_ctrl_mbox_msg msg = {0};
+	int ret;
+
+	msg.hdr.s.sz = msg_sz;
+	msg.sg_num = 1;
+	msg.sg_list[0].sz = msg_sz;
+	msg.sg_list[0].msg = &data;
+	while (true) {
+		/* mbox will overwrite msg.hdr.s.sz so initialize it */
+		msg.hdr.s.sz = msg_sz;
+		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox,
+					   (struct octep_ctrl_mbox_msg *)&msg,
+					   1);
+		if (ret <= 0)
+			break;
+
+		if (msg.hdr.s.flags & OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ)
+			process_mbox_req(oct, &msg);
+		else if (msg.hdr.s.flags & OCTEP_CTRL_MBOX_MSG_HDR_FLAG_RESP)
+			process_mbox_resp(oct, &msg);
+		else if (msg.hdr.s.flags & OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY)
+			process_mbox_notify(oct, &msg);
+	}
+
+	return 0;
+}
+
+int octep_ctrl_net_uninit(struct octep_device *oct)
+{
+	struct octep_ctrl_net_wait_data *pos, *n;
+
+	list_for_each_entry_safe(pos, n, &oct->ctrl_req_wait_list, list)
+		pos->done = 1;
+
+	wake_up_interruptible_all(&oct->ctrl_req_wait_q);
+
+	octep_ctrl_mbox_uninit(&oct->ctrl_mbox);
 
 	return 0;
 }

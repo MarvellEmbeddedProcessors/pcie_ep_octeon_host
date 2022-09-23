@@ -280,6 +280,17 @@ struct octep_device {
 	/* Work entry to handle ctrl mbox interrupt */
 	struct work_struct ctrl_mbox_task;
 
+	/* Wait queue for host to firmware requests */
+	wait_queue_head_t ctrl_req_wait_q;
+
+	/* List of objects waiting for h2f response */
+	struct list_head ctrl_req_wait_list;
+
+	/* timer to receive mbox msgs while pf interface is down */
+	struct timer_list ctrl_mbox_timer;
+
+	bool ctrl_mbox_timer_enabled;
+
 	/* VFs info */
 	struct octep_pfvf_info vf_info[OCTEP_MAX_VF];
 

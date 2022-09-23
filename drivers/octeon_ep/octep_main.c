@@ -20,6 +20,8 @@
 #include "octep_ctrl_net.h"
 #include "octep_pfvf_mbox.h"
 
+#define OCTEP_MBOX_TIMER_MS	100
+
 struct workqueue_struct *octep_wq;
 
 /* Supported Devices */
@@ -472,6 +474,24 @@ static void octep_link_up(struct net_device *netdev)
 }
 
 /**
+ * octep_ctrl_mbox_timer_func - timer function to handle ctrl mbox messages.
+ *
+ * @work: pointer to ctrl mbox work_struct
+ *
+ * Poll ctrl mbox message queue and handle control messages from firmware.
+ **/
+static void octep_ctrl_mbox_timer_func(struct timer_list *timer)
+{
+	struct octep_device *oct = from_timer(oct, timer, ctrl_mbox_timer);
+
+	if (oct->ctrl_mbox_timer_enabled) {
+		octep_ctrl_net_recv_fw_messages(oct);
+		mod_timer(&oct->ctrl_mbox_timer,
+			  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
+	}
+}
+
+/**
  * octep_open() - start the octeon network device.
  *
  * @netdev: pointer to kernel network device.
@@ -510,11 +530,11 @@ static int octep_open(struct net_device *netdev)
 	octep_napi_enable(oct);
 
 	oct->link_info.admin_up = 1;
-	octep_set_rx_state(oct, true);
-
-	ret = octep_get_link_status(oct);
-	if (!ret)
-		octep_set_link_status(oct, true);
+	octep_ctrl_net_set_rx_state(oct, OCTEP_CTRL_NET_INVALID_VFID, true,
+				    false);
+	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, true,
+				       false);
+	oct->ctrl_mbox_timer_enabled = false;
 
 	/* Enable the input and output queues for this Octeon device */
 	oct->hw_ops.enable_io_queues(oct);
@@ -524,7 +544,7 @@ static int octep_open(struct net_device *netdev)
 
 	octep_oq_dbell_init(oct);
 
-	ret = octep_get_link_status(oct);
+	ret = octep_ctrl_net_get_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID);
 	if (ret)
 		octep_link_up(netdev);
 
@@ -556,13 +576,15 @@ static int octep_stop(struct net_device *netdev)
 
 	netdev_info(netdev, "Stopping the device ...\n");
 
+	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
+				       false);
+	octep_ctrl_net_set_rx_state(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
+				    false);
+
 	/* Stop Tx from stack */
 	netif_tx_stop_all_queues(netdev);
 	netif_carrier_off(netdev);
 	netif_tx_disable(netdev);
-
-	octep_set_link_status(oct, false);
-	octep_set_rx_state(oct, false);
 
 	oct->link_info.admin_up = 0;
 	oct->link_info.oper_up = 0;
@@ -578,6 +600,11 @@ static int octep_stop(struct net_device *netdev)
 	oct->hw_ops.reset_io_queues(oct);
 	octep_free_oqs(oct);
 	octep_free_iqs(oct);
+
+	oct->ctrl_mbox_timer_enabled = true;
+	mod_timer(&oct->ctrl_mbox_timer,
+		  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
+
 	netdev_info(netdev, "Device stopped !!\n");
 	return 0;
 }
@@ -760,7 +787,9 @@ static void octep_get_stats64(struct net_device *netdev,
 	struct octep_device *oct = netdev_priv(netdev);
 	int q;
 
-	octep_get_if_stats(oct);
+	if (netif_running(netdev))
+		octep_ctrl_net_get_if_stats(oct, OCTEP_CTRL_NET_INVALID_VFID);
+
 	tx_packets = 0;
 	tx_bytes = 0;
 	rx_packets = 0;
@@ -835,7 +864,8 @@ static int octep_set_mac(struct net_device *netdev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	err = octep_set_mac_addr(oct, addr->sa_data);
+	err = octep_ctrl_net_set_mac_addr(oct, OCTEP_CTRL_NET_INVALID_VFID,
+					  addr->sa_data, true);
 	if (err)
 		return err;
 
@@ -859,7 +889,8 @@ static int octep_change_mtu(struct net_device *netdev, int new_mtu)
 	if (link_info->mtu == new_mtu)
 		return 0;
 
-	err = octep_set_mtu(oct, new_mtu);
+	err = octep_ctrl_net_set_mtu(oct, OCTEP_CTRL_NET_INVALID_VFID, new_mtu,
+				     true);
 	if (!err) {
 		oct->link_info.mtu = new_mtu;
 		netdev->mtu = new_mtu;
@@ -887,47 +918,10 @@ static const struct net_device_ops octep_netdev_ops = {
  **/
 static void octep_ctrl_mbox_task(struct work_struct *work)
 {
-	static uint16_t msg_sz = sizeof(union octep_ctrl_net_max_data);
 	struct octep_device *oct = container_of(work, struct octep_device,
 						ctrl_mbox_task);
-	struct net_device *netdev = oct->netdev;
-	union octep_ctrl_net_max_data data = {0};
-	struct octep_ctrl_mbox_msg msg = {0};
-	struct octep_ctrl_net_f2h_req *req;
-	int ret;
 
-	msg.hdr.s.sz = msg_sz;
-	msg.sg_num = 1;
-	msg.sg_list[0].sz = msg_sz;
-	msg.sg_list[0].msg = &data;
-	while (true) {
-		/* mbox will overwrite msg.hdr.s.sz so initialize it */
-		msg.hdr.s.sz = msg_sz;
-		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox,
-					   (struct octep_ctrl_mbox_msg *)&msg,
-					   1);
-		if (ret <= 0 ||
-		    !(msg.hdr.s.flags & OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY))
-			break;
-
-		req = (struct octep_ctrl_net_f2h_req *)&data.f2h_req;
-		switch (req->hdr.cmd) {
-		case OCTEP_CTRL_NET_F2H_CMD_LINK_STATUS:
-			if (netif_running(netdev)) {
-				if (req->link.state) {
-					dev_info(&oct->pdev->dev, "netif_carrier_on\n");
-					netif_carrier_on(netdev);
-				} else {
-					dev_info(&oct->pdev->dev, "netif_carrier_off\n");
-					netif_carrier_off(netdev);
-				}
-			}
-			break;
-		default:
-			pr_info("Unknown mbox req : %u\n", req->hdr.cmd);
-			break;
-		}
-	}
+	octep_ctrl_net_recv_fw_messages(oct);
 }
 
 static const char *octep_devid_to_str(struct octep_device *oct)
@@ -953,7 +947,6 @@ static const char *octep_devid_to_str(struct octep_device *oct)
  */
 int octep_device_setup(struct octep_device *oct)
 {
-	struct octep_ctrl_mbox *ctrl_mbox;
 	struct pci_dev *pdev = oct->pdev;
 	int i, ret;
 
@@ -990,15 +983,9 @@ int octep_device_setup(struct octep_device *oct)
 
 	oct->pkind = CFG_GET_IQ_PKIND(oct->conf);
 
-	/* Initialize control mbox */
-	ctrl_mbox = &oct->ctrl_mbox;
-	ctrl_mbox->barmem = CFG_GET_CTRL_MBOX_MEM_ADDR(oct->conf);
-	ret = octep_ctrl_mbox_init(ctrl_mbox);
-	if (ret) {
-		dev_err(&pdev->dev, "Failed to initialize control mbox\n");
-		return -1;
-	}
-	oct->ctrl_mbox_ifstats_offset = ctrl_mbox->barmem_sz;
+	ret = octep_ctrl_net_init(oct);
+	if (ret)
+		return ret;
 
 	return 0;
 
@@ -1024,7 +1011,7 @@ static void octep_device_cleanup(struct octep_device *oct)
 		oct->mbox[i] = NULL;
 	}
 
-	octep_ctrl_mbox_uninit(&oct->ctrl_mbox);
+	octep_ctrl_net_uninit(oct);
 
 	oct->hw_ops.soft_reset(oct);
 	for (i = 0; i < OCTEP_MMIO_REGIONS; i++) {
@@ -1094,6 +1081,10 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	INIT_WORK(&octep_dev->tx_timeout_task, octep_tx_timeout_task);
 	INIT_WORK(&octep_dev->ctrl_mbox_task, octep_ctrl_mbox_task);
+	octep_dev->ctrl_mbox_timer_enabled = true;
+	timer_setup(&octep_dev->ctrl_mbox_timer, octep_ctrl_mbox_timer_func, 0);
+	mod_timer(&octep_dev->ctrl_mbox_timer,
+		  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
 
 	netdev->netdev_ops = &octep_netdev_ops;
 	octep_set_ethtool_ops(netdev);
@@ -1105,7 +1096,8 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev->max_mtu = OCTEP_MAX_MTU;
 	netdev->mtu = OCTEP_DEFAULT_MTU;
 
-	octep_get_mac_addr(octep_dev, octep_dev->mac_addr);
+	octep_ctrl_net_get_mac_addr(octep_dev, OCTEP_CTRL_NET_INVALID_VFID,
+				    octep_dev->mac_addr);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
 	ether_addr_copy(netdev->dev_addr, octep_dev->mac_addr);
 	ether_addr_copy(netdev->perm_addr, octep_dev->mac_addr);
@@ -1160,6 +1152,8 @@ static void octep_remove(struct pci_dev *pdev)
 
 	cancel_work_sync(&oct->tx_timeout_task);
 	cancel_work_sync(&oct->ctrl_mbox_task);
+	oct->ctrl_mbox_timer_enabled = false;
+	del_timer(&oct->ctrl_mbox_timer);
 	netdev = oct->netdev;
 
 	if (netdev->reg_state == NETREG_REGISTERED)
