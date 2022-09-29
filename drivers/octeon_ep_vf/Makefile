@@ -6,7 +6,7 @@
 obj-$(CONFIG_OCTEON_EP) += octeon_ep_vf.o
 
 octeon_ep_vf-y := octep_vf_main.o octep_vf_cn9k.o octep_vf_tx.o octep_vf_rx.o \
-	       octep_vf_ethtool.o
+	       octep_vf_ethtool.o octep_vf_mbox.o
 
 KERNEL_DIR ?= /lib/modules/$(shell uname -r)/build
 all:

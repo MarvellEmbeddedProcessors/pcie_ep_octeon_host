@@ -546,6 +546,7 @@ static int octep_vf_stop(struct net_device *netdev)
 	octep_vf_napi_delete(oct);
 
 	octep_vf_clean_irqs(oct);
+	octep_vf_delete_mbox(oct);
 	octep_vf_clean_iqs(oct);
 
 	oct->hw_ops.disable_io_queues(oct);
@@ -721,9 +722,82 @@ dma_map_err:
 	return NETDEV_TX_OK;
 }
 
-static int octep_vf_get_if_stats(struct octep_vf_device *oct)
+int octep_vf_get_if_stats(struct octep_vf_device *oct)
 {
-	/* Sathesh: FIXME: implement using mailbox to PF and move to main.c */
+	struct ifla_vf_stats vf_stats;
+	int ret = 0, size = 0;
+
+	memset(&vf_stats, 0, sizeof(struct ifla_vf_stats));
+	ret = octep_vf_mbox_bulk_read(oct, OCTEP_PFVF_MBOX_CMD_GET_STATS,
+					   (u8 *)&vf_stats, &size);
+	if (!ret) {
+		oct->iface_tx_stats.octs = vf_stats.tx_bytes;
+		oct->iface_tx_stats.pkts = vf_stats.tx_packets;
+		oct->iface_tx_stats.dropped = vf_stats.tx_dropped;
+
+		oct->iface_rx_stats.octets = vf_stats.rx_bytes;
+		oct->iface_rx_stats.pkts = vf_stats.rx_packets;
+		oct->iface_rx_stats.mcast_pkts = vf_stats.multicast;
+		oct->iface_rx_stats.err_pkts = vf_stats.rx_dropped;
+	}
+	return ret;
+}
+
+int octep_vf_get_link_info(struct octep_vf_device *oct)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+	struct octep_vf_iface_link_info *link_info = &oct->link_info;
+
+	cmd.u64 = 0;
+	cmd.s_set_mac.opcode = OCTEP_PFVF_MBOX_CMD_GET_LINK;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (ret) {
+		dev_err(&oct->pdev->dev, "%s Mbox send fail ret value:%d\n", __func__, ret);
+		return ret;
+	}
+
+	if (rsp.s_get_link.link_status == OCTEP_PFVF_LINK_STATUS_DOWN) {
+		link_info->admin_up = OCTEP_PFVF_LINK_STATUS_DOWN;
+		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_DOWN;
+		dev_info(&oct->pdev->dev, "%s link status is Down\n", __func__);
+		return 0;
+	}
+	link_info->admin_up = OCTEP_PFVF_LINK_STATUS_UP;
+	link_info->oper_up = OCTEP_PFVF_LINK_STATUS_UP;
+	link_info->autoneg = (rsp.s_get_link.autoneg == OCTEP_PFVF_LINK_AUTONEG) ? 1 : 0;
+	switch (rsp.s_get_link.link_speed) {
+	case OCTEP_PFVF_LINK_SPEED_1000:
+		link_info->speed = 1000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_2500:
+		link_info->speed = 2500;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_5000:
+		link_info->speed = 5000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_10000:
+		link_info->speed = 10000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_20000:
+		link_info->speed = 20000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_25000:
+		link_info->speed = 25000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_40000:
+		link_info->speed = 40000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_50000:
+		link_info->speed = 50000;
+		break;
+	case OCTEP_PFVF_LINK_SPEED_100000:
+		link_info->speed = 100000;
+		break;
+	default:
+		link_info->speed = 0;
+	}
 	return 0;
 }
 
@@ -740,7 +814,6 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 	u64 tx_packets, tx_bytes, rx_packets, rx_bytes;
 	int q;
 
-	octep_vf_get_if_stats(oct);
 	tx_packets = 0;
 	tx_bytes = 0;
 	rx_packets = 0;
@@ -754,6 +827,7 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 		rx_packets += oq->stats.packets;
 		rx_bytes += oq->stats.bytes;
 	}
+	octep_vf_get_if_stats(oct);
 	stats->tx_packets = tx_packets;
 	stats->tx_bytes = tx_bytes;
 	stats->rx_packets = rx_packets;
@@ -804,12 +878,6 @@ static void octep_vf_tx_timeout(struct net_device *netdev, unsigned int txqueue)
 	queue_work(octep_vf_wq, &oct->tx_timeout_task);
 }
 
-/* FIXME: Sathesh: send mailbox command to PF driver. */
-int octep_vf_set_mac_addr(struct octep_vf_device *oct, u8 *addr)
-{
-	return 0;
-}
-
 static int octep_vf_set_mac(struct net_device *netdev, void *p)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
@@ -819,7 +887,7 @@ static int octep_vf_set_mac(struct net_device *netdev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	err = octep_vf_set_mac_addr(oct, addr->sa_data);
+	err = octep_vf_mbox_set_mac_addr(oct, addr->sa_data);
 	if (err)
 		return err;
 
@@ -833,12 +901,6 @@ static int octep_vf_set_mac(struct net_device *netdev, void *p)
 	return 0;
 }
 
-/* FIXME: Sathesh: send mailbox command to PF driver */
-static int octep_vf_set_mtu(struct octep_vf_device *oct, int mtu)
-{
-	return 0;
-}
-
 static int octep_vf_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
@@ -849,12 +911,11 @@ static int octep_vf_change_mtu(struct net_device *netdev, int new_mtu)
 	if (link_info->mtu == new_mtu)
 		return 0;
 
-	err = octep_vf_set_mtu(oct, new_mtu);
+	err = octep_vf_mbox_send_set_mtu(oct, new_mtu);
 	if (!err) {
 		oct->link_info.mtu = new_mtu;
 		netdev->mtu = new_mtu;
 	}
-
 	return err;
 }
 
@@ -1037,6 +1098,11 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to register netdev\n");
+		goto register_dev_err;
+	}
+	err = octep_vf_setup_mbox(octep_vf_dev);
+	if (err) {
+		dev_err(&pdev->dev, "VF Mailbox setup failed\n");
 		goto register_dev_err;
 	}
 	dev_info(&pdev->dev, "Device probe successful\n");

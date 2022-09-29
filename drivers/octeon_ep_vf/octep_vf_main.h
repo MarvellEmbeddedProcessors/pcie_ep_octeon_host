@@ -10,6 +10,7 @@
 
 #include "octep_vf_tx.h"
 #include "octep_vf_rx.h"
+#include "octep_vf_mbox.h"
 
 #define OCTEP_VF_DRV_NAME	"octeon_ep_vf"
 #define OCTEP_VF_DRV_STRING	"Marvell Octeon EndPoint NIC VF Driver"
@@ -73,11 +74,17 @@ struct octep_vf_hw_ops {
 
 /* Octeon mailbox data */
 struct octep_vf_mbox_data {
-	u32 cmd;
 	u32 total_len;
 	u32 recv_len;
 	u32 rsvd;
-	u64 *data;
+	u32 data_index;
+	u8 recv_data[OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE];
+};
+
+/* wrappers around work structs */
+struct octep_vf_mbox_wk {
+	struct work_struct work;
+	void *ctxptr;
 };
 
 /* Octeon device mailbox */
@@ -102,6 +109,8 @@ struct octep_vf_mbox {
 	u8 __iomem *mbox_read_reg;
 
 	struct octep_vf_mbox_data mbox_data;
+
+	struct octep_vf_mbox_wk wk;
 };
 
 /* Tx/Rx queue vector per interrupt. */
@@ -289,5 +298,7 @@ void octep_vf_device_setup_cn93(struct octep_vf_device *oct);
 int octep_vf_iq_process_completions(struct octep_vf_iq *iq, u16 budget);
 int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget);
 void octep_vf_set_ethtool_ops(struct net_device *netdev);
-
+int octep_vf_get_link_info(struct octep_vf_device *oct);
+int octep_vf_get_if_stats(struct octep_vf_device *oct);
+void octep_vf_mbox_work(struct work_struct *work);
 #endif /* _OCTEP_MAIN_H_ */

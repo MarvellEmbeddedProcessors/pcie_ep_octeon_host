@@ -267,59 +267,33 @@ static void octep_vf_setup_mbox_regs_cn93(struct octep_vf_device *oct, int q_no)
 	mbox->mbox_write_reg = oct->mmio.hw_addr + CN93_VF_SDP_R_MBOX_VF_PF_DATA(q_no);
 }
 
-/* FIXME: Sathesh: this API should handle only one mbox that is corresponding
- * to Tx/Rx queue pair and call it from main interrupt handler.
- * Sathesh to review and modify for mailbox interrupt handling.
- */
-#if 0
 /* Mailbox Interrupt handler */
 static void cn93_handle_vf_mbox_intr(struct octep_vf_device *oct)
 {
-/* VSR: work with Sathesh */
-	u64 mbox_int_val = 0ULL, val = 0ULL, qno = 0ULL;
+	int ring = 0;
 
-	mbox_int_val = readq(oct->mbox[0]->mbox_int_reg);
-	for (qno = 0; qno < OCTEP_MAX_VF; qno++) {
-		val = readq(oct->mbox[qno]->mbox_read_reg);
-		dev_dbg(&oct->pdev->dev,
-			"VF MBOX READ: val:%llx from VF:%llx\n", val, qno);
-	}
-
-	writeq(mbox_int_val, oct->mbox[0]->mbox_int_reg);
+	if (oct->mbox[ring])
+		schedule_work(&oct->mbox[ring]->wk.work);
+	else
+		dev_err(&oct->pdev->dev, "%s bad mbox vf %d\n", __func__, ring);
 }
-
-/* Interrupts handler for all non-queue generic interrupts. */
-static irqreturn_t octep_vf_non_ioq_intr_handler_cn93(void *dev)
-{
-	struct octep_vf_device *oct = (struct octep_vf_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
-	u64 reg_val = 0;
-
-	/* Check for MBOX INTR */
-	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_EPF_MBOX_RINT(0));
-	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received MBOX_RINT intr: 0x%llx\n", reg_val);
-		cn93_handle_vf_mbox_intr(oct);
-		goto irq_handled;
-	}
-
-	dev_info(&pdev->dev, "Reserved interrupts raised; Ignore\n");
-irq_handled:
-	return IRQ_HANDLED;
-}
-#endif
 
 /* Tx/Rx queue interrupt handler */
 static irqreturn_t octep_vf_ioq_intr_handler_cn93(void *data)
 {
 	struct octep_vf_ioq_vector *vector = (struct octep_vf_ioq_vector *)data;
 	struct octep_vf_oq *oq = vector->oq;
+	struct octep_vf_device *oct = vector->octep_vf_dev;
+	u64 reg_val = 0ULL;
 
-	/* TODO: VSR: do we need to check for mbox interrupt here
-	 * or handle in NAPI itself ?
-	 */
-	/* FIXME: VSR: register different handler for mailbox ?? */
+	/* Check PF to VF mailbox interrupt signal by checking 1st bit of queue zero */
+	if (oq->q_no == 0) {
+		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0));
+		if (reg_val & CN93_VF_INTR_MBOX_STATUS) {
+			cn93_handle_vf_mbox_intr(oct);
+			octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0), reg_val);
+		}
+	}
 	napi_schedule_irqoff(oq->napi);
 	return IRQ_HANDLED;
 }
@@ -368,14 +342,20 @@ static void octep_vf_enable_interrupts_cn93(struct octep_vf_device *oct)
 		reg_val |= (0x1ULL << 62);
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q), reg_val);
 	}
-	/* TODO: FIXME: enable mbox interrupt */
+	/* Enable PF to VF mbox interrupt by setting 2nd bit*/
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0), CN93_VF_INTR_MBOX_ENABLE);
 }
 
 /* Disable all interrupts */
 static void octep_vf_disable_interrupts_cn93(struct octep_vf_device *oct)
 {
-	int num_rings, q;
+	int num_rings, q, mbox_ring = 0;
 	u64 reg_val;
+
+	/* Disable PF to VF mbox interrupt by setting 2nd bit*/
+	if (oct->mbox[mbox_ring])
+		octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0),
+				     CN93_VF_INTR_MBOX_DISABLE);
 
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 	for (q = 0; q < num_rings; q++) {
@@ -387,7 +367,6 @@ static void octep_vf_disable_interrupts_cn93(struct octep_vf_device *oct)
 		reg_val &= ~(0x1ULL << 62);
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q), reg_val);
 	}
-	/* TODO: FIXME: disable mbox interrupt */
 }
 
 /* Get new Octeon Read Index: index of descriptor that Octeon reads next. */
@@ -531,6 +510,5 @@ void octep_vf_device_setup_cn93(struct octep_vf_device *oct)
 	oct->hw_ops.reset_io_queues = octep_vf_reset_io_queues_cn93;
 
 	oct->hw_ops.dump_registers = octep_vf_dump_registers_cn93;
-
 	octep_vf_init_config_cn93_vf(oct);
 }

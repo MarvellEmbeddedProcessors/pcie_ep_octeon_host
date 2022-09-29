@@ -34,18 +34,6 @@ static const char octep_vf_gstrings_global_stats[][ETH_GSTRING_LEN] = {
 	"rx_err_pkts",
 };
 
-static int octep_vf_get_link_info(struct octep_vf_device *oct)
-{
-	/* Sathesh: FIXME: implement using mailbox to PF and move to main.c */
-	return 0;
-}
-
-static int octep_vf_get_if_stats(struct octep_vf_device *oct)
-{
-	/* Sathesh: FIXME: implement using mailbox to PF and move to main.c */
-	return 0;
-}
-
 #define OCTEP_VF_GLOBAL_STATS_CNT (sizeof(octep_vf_gstrings_global_stats) / ETH_GSTRING_LEN)
 
 static const char octep_vf_gstrings_tx_q_stats[][ETH_GSTRING_LEN] = {

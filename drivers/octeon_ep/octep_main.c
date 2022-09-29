@@ -1112,7 +1112,7 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 	dev_info(&pdev->dev, "Device probe successful\n");
 
-	err = octep_setup_vf_mbox(octep_dev);
+	err = octep_setup_pfvf_mbox(octep_dev);
 	if (err) {
 		dev_err(&pdev->dev, "OCTEON: Mailbox setup failed\n");
 		goto register_dev_err;
@@ -1148,7 +1148,7 @@ static void octep_remove(struct pci_dev *pdev)
 	if (!oct)
 		return;
 
-	octep_delete_vf_mbox(oct);
+	octep_delete_pfvf_mbox(oct);
 
 	cancel_work_sync(&oct->tx_timeout_task);
 	cancel_work_sync(&oct->ctrl_mbox_task);

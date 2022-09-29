@@ -372,15 +372,18 @@ static void cn93_handle_pf_mbox_intr(struct octep_device *oct,
 {
 	u32 vf = 0;
 	u32 active_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
+	u32 active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
+	u32 vf_mbox_queue_num = 0;
 
 	if (reg_rint0_val) {
 		for (vf = 0; vf < active_vfs; vf++) {
-			if (reg_rint0_val & (0x1UL << vf)) {
-				if (oct->mbox[vf] != NULL)
-					schedule_work(&oct->mbox[vf]->wk.work);
+			vf_mbox_queue_num = vf * active_rings_per_vf;
+			if (reg_rint0_val & (0x1UL << vf_mbox_queue_num)) {
+				if (oct->mbox[vf_mbox_queue_num] != NULL)
+					schedule_work(&oct->mbox[vf_mbox_queue_num]->wk.work);
 				else {
 					dev_err(&oct->pdev->dev,
-						"bad mbox vf %d\n", vf);
+						"bad mbox vf %d\n", vf_mbox_queue_num);
 				}
 			}
 		}
@@ -473,8 +476,7 @@ static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 	/* Check for OEI INTR */
 	reg_val = octep_read_csr64(oct, CN93_SDP_EPF_OEI_RINT);
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received OEI_RINT intr: 0x%llx\n", reg_val);
+		/* dev_info(&pdev->dev, "Received OEI_RINT intr: 0x%llx\n", reg_val); */
 		octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT, reg_val);
 		if (reg_val & CN93_SDP_EPF_OEI_RINT_DATA_BIT_MBOX)
 			queue_work(octep_wq, &oct->ctrl_mbox_task);

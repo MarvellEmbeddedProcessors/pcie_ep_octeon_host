@@ -24,24 +24,18 @@ static void octep_pfvf_get_link_status(struct octep_device *oct, u32 vf_id,
 				      union octep_pfvf_mbox_word cmd,
 				      union octep_pfvf_mbox_word *rsp)
 {
-	rsp->s_get_link.id = cmd.s_get_link.id;
 	rsp->s_get_link.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 	rsp->s_get_link.link_status =  OCTEP_PFVF_LINK_STATUS_UP;
 	rsp->s_get_link.link_speed = OCTEP_PFVF_LINK_SPEED_10000;
 	rsp->s_get_link.duplex = OCTEP_PFVF_LINK_FULL_DUPLEX;
 	rsp->s_get_link.autoneg = OCTEP_PFVF_LINK_AUTONEG;
-	dev_info(&oct->pdev->dev, "%s cmd vf %d cmd_id %d\n",
-		  __func__, vf_id, cmd.s_get_link.id);
 }
 
 static void octep_pfvf_set_mtu(struct octep_device *oct, u32 vf_id,
 			       union octep_pfvf_mbox_word cmd,
 			       union octep_pfvf_mbox_word *rsp)
 {
-	rsp->s_set_mtu.id = cmd.s_set_mtu.id;
 	rsp->s_set_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	dev_info(&oct->pdev->dev, "%s mtu cmd vf %d id %d mtu is %d\n",
-		  __func__, vf_id, cmd.s_set_mtu.id, (int)cmd.s_set_mtu.mtu);
 }
 
 static void octep_pfvf_set_mac_addr(struct octep_device *oct,  u32 vf_id,
@@ -56,9 +50,7 @@ static void octep_pfvf_set_mac_addr(struct octep_device *oct,  u32 vf_id,
 		oct->vf_info[vf_id].mac_addr[i] = cmd.s_set_mac.mac_addr[i];
 	}
 
-	rsp->s_set_mac.id = cmd.s_set_mac.id;
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	dev_info(&oct->pdev->dev, "%s %pM\n",  __func__, oct->vf_info[vf_id].mac_addr);
 }
 
 static void octep_pfvf_get_mac_addr(struct octep_device *oct,  u32 vf_id,
@@ -67,16 +59,13 @@ static void octep_pfvf_get_mac_addr(struct octep_device *oct,  u32 vf_id,
 {
 	int i;
 
-	rsp->s_set_mac.id = cmd.s_set_mac.id;
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 	for (i = 0; i < OCTEP_PFVF_MBOX_MAX_DATA_SIZE; i++) {
 		rsp->s_set_mac.mac_addr[i] = oct->vf_info[vf_id].mac_addr[i];
 	}
-	dev_info(&oct->pdev->dev, "%s vf_info: %pM\n",  __func__, oct->vf_info[vf_id].mac_addr);
 }
 
-
-int octep_setup_vf_mbox(struct octep_device *oct)
+int octep_setup_pfvf_mbox(struct octep_device *oct)
 {
 	int i = 0, num_vfs = 0, rings_per_vf = 0;
 	int ring = 0;
@@ -102,8 +91,6 @@ int octep_setup_vf_mbox(struct octep_device *oct)
 		oct->mbox[ring]->oct = oct;
 		oct->mbox[ring]->vf_id = i;
 		oct->hw_ops.setup_mbox_regs(oct, ring);
-		dev_info(&oct->pdev->dev, "%s num_vfs:%d ring:%d\n",
-			 __func__, num_vfs, ring);
 	}
 	return 0;
 
@@ -118,7 +105,7 @@ free_mbox:
 	return 1;
 }
 
-void octep_delete_vf_mbox(struct octep_device *oct)
+void octep_delete_pfvf_mbox(struct octep_device *oct)
 {
 	int rings_per_vf = oct->conf->sriov_cfg.max_rings_per_vf;
 	int num_vfs = oct->conf->sriov_cfg.active_vfs;
@@ -131,7 +118,6 @@ void octep_delete_vf_mbox(struct octep_device *oct)
 		vfree(oct->mbox[ring]);
 		oct->mbox[ring] = NULL;
 	}
-	dev_info(&oct->pdev->dev, "%s OCTEON_EP: freed mbox struct.\n",  __func__);
 }
 
 static void octep_pfvf_pf_get_data(struct octep_device *oct,
@@ -142,9 +128,7 @@ static void octep_pfvf_pf_get_data(struct octep_device *oct,
 	int length = 0;
 	int i = 0;
 
-	rsp->s_data.id = cmd.s_data.id;
 	rsp->s_data.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	dev_info(&oct->pdev->dev, "%s received\n", __func__);
 
 	if (cmd.s_data.frag != OCTEP_PFVF_MBOX_MORE_FRAG_FLAG) {
 		mbox->config_data_index = 0;
@@ -153,21 +137,15 @@ static void octep_pfvf_pf_get_data(struct octep_device *oct,
 		 * specific API should be called to fetch
 		 * the requested data
 		 */
+
 		*((int32_t *)rsp->s_data.data) = mbox->message_len;
-		dev_dbg(&oct->pdev->dev, "%s msg len %d:\n", __func__,
-			mbox->message_len);
 		return;
 	}
 
-	if (mbox->message_len > OCTEP_PFVF_MBOX_MAX_DATA_SIZE) {
+	if (mbox->message_len > OCTEP_PFVF_MBOX_MAX_DATA_SIZE)
 		length = OCTEP_PFVF_MBOX_MAX_DATA_SIZE;
-		dev_dbg(&oct->pdev->dev,
-			"%s more to send data to VF\n", __func__);
-	} else {
+	else
 		length = mbox->message_len;
-		dev_dbg(&oct->pdev->dev,
-			"%s last to send data to VF\n", __func__);
-	}
 
 	mbox->message_len -= length;
 
@@ -175,48 +153,6 @@ static void octep_pfvf_pf_get_data(struct octep_device *oct,
 		rsp->s_data.data[i] =
 			mbox->config_data[mbox->config_data_index];
 		mbox->config_data_index++;
-	}
-}
-
-static void octep_pfvf_pf_config_data(struct octep_device *oct, struct octep_mbox *mbox,
-				      int vf_id, union octep_pfvf_mbox_word cmd,
-				      union octep_pfvf_mbox_word *rsp)
-{
-	int length;
-	int i = 0;
-
-	rsp->s_data.id = cmd.s_data.id;
-	rsp->s_data.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	dev_info(&oct->pdev->dev, "%s received\n", __func__);
-
-	if ((cmd.s_data.frag == OCTEP_PFVF_MBOX_MORE_FRAG_FLAG) &&
-	    (mbox->message_len == 0)) {
-		length = *((int32_t *)cmd.s_data.data);
-		mbox->message_len = length;
-		mbox->config_data_index = 0;
-		memset(mbox->config_data, 0, MAX_VF_PF_MBOX_DATA_SIZE);
-		return;
-	}
-
-	if (cmd.s_data.frag == OCTEP_PFVF_MBOX_MORE_FRAG_FLAG) {
-		for (i = 0; i < OCTEP_PFVF_MBOX_MAX_DATA_SIZE; i++) {
-			mbox->config_data[mbox->config_data_index]
-				= cmd.s_data.data[i];
-			mbox->config_data_index++;
-		}
-		mbox->message_len -= OCTEP_PFVF_MBOX_MAX_DATA_SIZE;
-	} else {
-		for (i = 0; i < mbox->message_len; i++) {
-			mbox->config_data[mbox->config_data_index]
-				= cmd.s_data.data[i];
-			mbox->config_data_index++;
-		}
-		/* Calls OPCODE specific configuration handler by passing
-		 * received config data as input argument.
-		 */
-		mbox->config_data_index = 0;
-		mbox->message_len = 0;
-		memset(mbox->config_data, 0, MAX_VF_PF_MBOX_DATA_SIZE);
 	}
 }
 
@@ -237,15 +173,6 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 	cmd.u64 = readq(mbox->vf_pf_data_reg);
 	rsp.u64 = 0;
 
-
-	if (cmd.s.version != OCTEP_PF_MBOX_VERSION) {
-		dev_info(&oct->pdev->dev,
-			"%s mbox version mis match vf version %d pf version %d\n",
-			__func__, cmd.s.version, OCTEP_PF_MBOX_VERSION);
-		rsp.s.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
-		goto done;
-	}
-
 	switch (cmd.s.opcode) {
 	case OCTEP_PFVF_MBOX_CMD_GET_LINK:
 		octep_pfvf_get_link_status(oct, vf_id, cmd, &rsp);
@@ -259,18 +186,15 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 	case OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR:
 		octep_pfvf_get_mac_addr(oct, vf_id, cmd, &rsp);
 		break;
-	case OCTEP_PFVF_MBOX_CMD_BULK_SEND:
-		octep_pfvf_pf_config_data(oct, mbox, vf_id, cmd, &rsp);
-		break;
-	case OCTEP_PFVF_MBOX_CMD_BULK_GET:
+	case OCTEP_PFVF_MBOX_CMD_GET_STATS:
 		octep_pfvf_pf_get_data(oct, mbox, vf_id, cmd, &rsp);
 		break;
 	default:
-		dev_info(&oct->pdev->dev, "%s OCTEP_PFVF_MBOX_TYPE_RSP_NACK\n", __func__);
+		dev_err(&oct->pdev->dev, "%s OCTEP_PFVF_MBOX_TYPE_RSP_NACK opcode:%d\n",
+					  __func__, cmd.s.opcode);
 		rsp.s.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
 		break;
 	}
-done:
 	writeq(rsp.u64, mbox->vf_pf_data_reg);
 	mutex_unlock(&mbox->lock);
 }

@@ -4,11 +4,11 @@
  * Copyright (C) 2020 Marvell.
  *
  */
-#ifndef _OCTEP_PFVF_MBOX_H_
-#define _OCTEP_PFVF_MBOX_H_
+#ifndef _OCTEP_VF_MBOX_H_
+#define _OCTEP_VF_MBOX_H_
 
 
-#define OCTEP_PF_MBOX_VERSION 0
+#define OCTEP_VF_MBOX_VERSION 0
 
 enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_SET_MTU,
@@ -68,10 +68,19 @@ enum octep_pfvf_link_autoneg {
 	OCTEP_PFVF_LINK_FIXED,
 };
 
+struct octep_pfvf_mbox_link {
+	uint64_t link_status:1;
+	uint64_t link_speed:8;
+	uint64_t duplex:1;
+	uint64_t autoneg:1;
+	uint64_t rsvd:37;
+} __packed;
+
 #define OCTEP_PFVF_MBOX_TIMEOUT_MS     10
 #define OCTEP_PFVF_MBOX_MAX_RETRIES    2
 #define OCTEP_PFVF_MBOX_VERSION        0
 #define OCTEP_PFVF_MBOX_MAX_DATA_SIZE  6
+#define OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE 256
 #define OCTEP_PFVF_MBOX_MORE_FRAG_FLAG 1
 #define OCTEP_PFVF_MBOX_WRITE_WAIT_TIME msecs_to_jiffies(1)
 
@@ -113,7 +122,13 @@ union octep_pfvf_mbox_word {
 	} s_get_link;
 } __packed;
 
-void octep_pfvf_mbox_work(struct work_struct *work);
-int octep_setup_pfvf_mbox(struct octep_device *oct);
-void octep_delete_pfvf_mbox(struct octep_device *oct);
+int octep_vf_setup_mbox(struct octep_vf_device *oct);
+void octep_vf_delete_mbox(struct octep_vf_device *oct);
+int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_word cmd,
+			   union octep_pfvf_mbox_word *rsp);
+int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_opcode opcode,
+			    u8 *data, int *size);
+int octep_vf_mbox_send_set_mtu(struct octep_vf_device *oct, int mtu);
+int octep_vf_mbox_set_mac_addr(struct octep_vf_device *oct, char *mac_addr);
+int octep_vf_mbox_get_mac_addr(struct octep_vf_device *oct, char *mac_addr);
 #endif
