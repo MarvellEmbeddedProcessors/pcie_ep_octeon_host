@@ -297,16 +297,6 @@ static irqreturn_t octep_vf_ioq_intr_handler_cn93(void *data)
 	return IRQ_HANDLED;
 }
 
-/* Soft reset of VF */
-static int octep_vf_soft_reset_cn93(struct octep_vf_device *oct)
-{
-/* FIXME: VSR: check with Satanand/Radhamohan; can this be removed ?? */
-	dev_info(&oct->pdev->dev, "CN93XX: Doing soft reset\n");
-
-	// FIXME: VSR: send a mailbox command to PF ?
-	return 0;
-}
-
 /* Re-initialize Octeon hardware registers */
 static void octep_vf_reinit_regs_cn93(struct octep_vf_device *oct)
 {
@@ -491,7 +481,6 @@ void octep_vf_device_setup_cn93(struct octep_vf_device *oct)
 	//oct->hw_ops.non_ioq_intr_handler = octep_vf_non_ioq_intr_handler_cn93;
 	oct->hw_ops.ioq_intr_handler = octep_vf_ioq_intr_handler_cn93;
 	//oct->hw_ops.mbox_intr_handler = octep_vf_mbox_intr_handler_cn93;
-	oct->hw_ops.soft_reset = octep_vf_soft_reset_cn93;
 	oct->hw_ops.reinit_regs = octep_vf_reinit_regs_cn93;
 
 	oct->hw_ops.enable_interrupts = octep_vf_enable_interrupts_cn93;

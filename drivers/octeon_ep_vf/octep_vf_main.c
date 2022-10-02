@@ -1003,8 +1003,6 @@ static void octep_vf_device_cleanup(struct octep_vf_device *oct)
 {
 	dev_info(&oct->pdev->dev, "Cleaning up Octeon Device ...\n");
 
-	//TODO: FIXME: do we need soft_reset for VF ?
-	oct->hw_ops.soft_reset(oct);
 	if (oct->mmio.mapped)
 		iounmap(oct->mmio.hw_addr);
 

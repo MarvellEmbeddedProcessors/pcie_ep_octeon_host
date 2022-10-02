@@ -55,7 +55,6 @@ struct octep_vf_hw_ops {
 
 	irqreturn_t (*non_ioq_intr_handler)(void *ioq_vector);
 	irqreturn_t (*ioq_intr_handler)(void *ioq_vector);
-	int (*soft_reset)(struct octep_vf_device *oct);
 	void (*reinit_regs)(struct octep_vf_device *oct);
 	u32  (*update_iq_read_idx)(struct octep_vf_iq *iq);
 
