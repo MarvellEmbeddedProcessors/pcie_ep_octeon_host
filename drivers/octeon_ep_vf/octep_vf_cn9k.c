@@ -137,13 +137,12 @@ static void octep_vf_reset_io_queues_cn93(struct octep_vf_device *oct)
 static void octep_vf_init_config_cn93_vf(struct octep_vf_device *oct)
 {
 	struct octep_vf_config *conf = oct->conf;
+	u64 reg_val;
 
-	/* TODO: VSR: Get the max IO ring count from SDP(0)_R(0..255)_IN_CONTROL
-	 * also activate max rings for VFs by defeault.
-	 */
-	/* VSR: FIXME: get max_io_rings from PF using mailbox command */
-	conf->ring_cfg.max_io_rings = 8;
-	conf->ring_cfg.active_io_rings = 8;
+	reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_IN_CONTROL(0));
+	conf->ring_cfg.max_io_rings = (reg_val >> CN93_VF_R_IN_CTL_RPVF_POS) &
+				      CN93_VF_R_IN_CTL_RPVF_MASK;
+	conf->ring_cfg.active_io_rings = conf->ring_cfg.max_io_rings;
 
 	conf->iq.num_descs = OCTEP_VF_IQ_MAX_DESCRIPTORS;
 	conf->iq.instr_type = OCTEP_VF_64BYTE_INSTR;

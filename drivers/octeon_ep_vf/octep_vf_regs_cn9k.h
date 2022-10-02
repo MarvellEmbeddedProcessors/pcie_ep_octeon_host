@@ -60,7 +60,6 @@
 /*------------------ R_IN Masks ----------------*/
 
 /** Rings per Virtual Function **/
-/* FIXME: VSR: are these required ?? */
 #define    CN93_VF_R_IN_CTL_RPVF_MASK    (0xF)
 #define	   CN93_VF_R_IN_CTL_RPVF_POS     (48)
 
