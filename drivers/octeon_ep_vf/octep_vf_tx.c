@@ -206,7 +206,7 @@ static int octep_vf_setup_iq(struct octep_vf_device *oct, int q_no)
 	}
 
 	/* Allocate memory for hardware SGLIST descriptors */
-	sglist_size = OCTEP_SGLIST_SIZE_PER_PKT *
+	sglist_size = OCTEP_VF_SGLIST_SIZE_PER_PKT *
 		      CFG_GET_IQ_NUM_DESC(oct->conf);
 	iq->sglist = dma_alloc_coherent(iq->dev, sglist_size,
 					&iq->sglist_dma, GFP_KERNEL);
@@ -232,9 +232,9 @@ static int octep_vf_setup_iq(struct octep_vf_device *oct, int q_no)
 
 		tx_buffer = &iq->buff_info[i];
 		tx_buffer->sglist =
-			&iq->sglist[i * OCTEP_SGLIST_ENTRIES_PER_PKT];
+			&iq->sglist[i * OCTEP_VF_SGLIST_ENTRIES_PER_PKT];
 		tx_buffer->sglist_dma =
-			iq->sglist_dma + (i * OCTEP_SGLIST_SIZE_PER_PKT);
+			iq->sglist_dma + (i * OCTEP_VF_SGLIST_SIZE_PER_PKT);
 	}
 
 	octep_vf_iq_reset_indices(iq);
@@ -277,7 +277,7 @@ static void octep_vf_free_iq(struct octep_vf_iq *iq)
 		dma_free_coherent(iq->dev, desc_ring_size,
 				  iq->desc_ring, iq->desc_ring_dma);
 
-	sglist_size = OCTEP_SGLIST_SIZE_PER_PKT *
+	sglist_size = OCTEP_VF_SGLIST_SIZE_PER_PKT *
 		      CFG_GET_IQ_NUM_DESC(oct->conf);
 	if (iq->sglist)
 		dma_free_coherent(iq->dev, sglist_size,

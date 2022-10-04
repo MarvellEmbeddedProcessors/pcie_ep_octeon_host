@@ -5,8 +5,8 @@
  *
  */
 
-#ifndef _OCTEP_TX_H_
-#define _OCTEP_TX_H_
+#ifndef _OCTEP_VF_TX_H_
+#define _OCTEP_VF_TX_H_
 
 #define IQ_SEND_OK          0
 #define IQ_SEND_STOP        1
@@ -29,9 +29,9 @@ struct octep_vf_tx_sglist_desc {
  * To allocate sufficient SGLIST entries for a packet with max fragments,
  * align by adding 3 before calcuating max SGLIST entries per packet.
  */
-#define OCTEP_SGLIST_ENTRIES_PER_PKT ((MAX_SKB_FRAGS + 1 + 3) / 4)
-#define OCTEP_SGLIST_SIZE_PER_PKT \
-	(OCTEP_SGLIST_ENTRIES_PER_PKT * sizeof(struct octep_vf_tx_sglist_desc))
+#define OCTEP_VF_SGLIST_ENTRIES_PER_PKT ((MAX_SKB_FRAGS + 1 + 3) / 4)
+#define OCTEP_VF_SGLIST_SIZE_PER_PKT \
+	(OCTEP_VF_SGLIST_ENTRIES_PER_PKT * sizeof(struct octep_vf_tx_sglist_desc))
 
 struct octep_vf_tx_buffer {
 	struct sk_buff *skb;
@@ -237,4 +237,4 @@ struct octep_vf_tx_desc_hw {
 };
 
 #define OCTEP_VF_IQ_DESC_SIZE (sizeof(struct octep_vf_tx_desc_hw))
-#endif /* _OCTEP_TX_H_ */
+#endif /* _OCTEP_VF_TX_H_ */

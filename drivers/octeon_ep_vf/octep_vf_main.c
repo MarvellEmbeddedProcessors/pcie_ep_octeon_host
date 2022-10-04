@@ -326,8 +326,8 @@ static void octep_vf_enable_ioq_irq(struct octep_vf_iq *iq, struct octep_vf_oq *
 
 	/* Flush the previous wrties before writing to RESEND bit */
 	wmb();
-	writeq(1UL << OCTEP_OQ_INTR_RESEND_BIT, oq->pkts_sent_reg);
-	writeq(1UL << OCTEP_IQ_INTR_RESEND_BIT, iq->inst_cnt_reg);
+	writeq(1UL << OCTEP_VF_OQ_INTR_RESEND_BIT, oq->pkts_sent_reg);
+	writeq(1UL << OCTEP_VF_IQ_INTR_RESEND_BIT, iq->inst_cnt_reg);
 }
 
 /**
@@ -660,9 +660,9 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 			goto dma_map_err;
 
 		dma_sync_single_for_cpu(iq->dev, tx_buffer->sglist_dma,
-					OCTEP_SGLIST_SIZE_PER_PKT,
+					OCTEP_VF_SGLIST_SIZE_PER_PKT,
 					DMA_TO_DEVICE);
-		memset(sglist, 0, OCTEP_SGLIST_SIZE_PER_PKT);
+		memset(sglist, 0, OCTEP_VF_SGLIST_SIZE_PER_PKT);
 		sglist[0].len[3] = len;
 		sglist[0].dma_ptr[0] = dma;
 
@@ -682,7 +682,7 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 			si++;
 		}
 		dma_sync_single_for_device(iq->dev, tx_buffer->sglist_dma,
-					   OCTEP_SGLIST_SIZE_PER_PKT,
+					   OCTEP_VF_SGLIST_SIZE_PER_PKT,
 					   DMA_TO_DEVICE);
 
 		hw_desc->dptr = tx_buffer->sglist_dma;
@@ -973,7 +973,8 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 	case OCTEP_PCI_DEVICE_ID_CNF95O_VF:
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
 		dev_info(&pdev->dev, "Setting up OCTEON %s PF PASS%d.%d\n",
-			 octep_vf_devid_to_str(oct), OCTEP_MAJOR_REV(oct), OCTEP_MINOR_REV(oct));
+			 octep_vf_devid_to_str(oct), OCTEP_VF_MAJOR_REV(oct),
+			 OCTEP_VF_MINOR_REV(oct));
 		octep_vf_device_setup_cn93(oct);
 		break;
 	default:
@@ -1054,7 +1055,7 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pci_set_master(pdev);
 
 	netdev = alloc_etherdev_mq(sizeof(struct octep_vf_device),
-				   OCTEP_MAX_QUEUES);
+				   OCTEP_VF_MAX_QUEUES);
 	if (!netdev) {
 		dev_err(&pdev->dev, "Failed to allocate netdev\n");
 		err = -ENOMEM;

@@ -5,8 +5,8 @@
  *
  */
 
-#ifndef _OCTEP_MAIN_H_
-#define _OCTEP_MAIN_H_
+#ifndef _OCTEP_VF_MAIN_H_
+#define _OCTEP_VF_MAIN_H_
 
 #include "octep_vf_tx.h"
 #include "octep_vf_rx.h"
@@ -19,21 +19,15 @@
 #define  OCTEP_PCI_DEVICE_ID_CNF95O_VF 0xB603    //95O VF
 #define  OCTEP_PCI_DEVICE_ID_CNF95N_VF 0xB403    //95N VF
 
-#define  OCTEP_MAX_QUEUES   63
-#define  OCTEP_MAX_IQ       OCTEP_MAX_QUEUES
-#define  OCTEP_MAX_OQ       OCTEP_MAX_QUEUES
-#define  OCTEP_MAX_VF       64
+#define  OCTEP_VF_MAX_QUEUES   63
+#define  OCTEP_VF_MAX_IQ       OCTEP_VF_MAX_QUEUES
+#define  OCTEP_VF_MAX_OQ       OCTEP_VF_MAX_QUEUES
+#define  OCTEP_MAX_VF       64 //VSR:FIXME: delete it
 
-#define OCTEP_MAX_MSIX_VECTORS OCTEP_MAX_OQ
+#define OCTEP_VF_MAX_MSIX_VECTORS OCTEP_VF_MAX_OQ
 
-/* Flags to disable and enable Interrupts */
-#define  OCTEP_INPUT_INTR    (1)
-#define  OCTEP_OUTPUT_INTR   (2)
-#define  OCTEP_MBOX_INTR     (4)
-#define  OCTEP_ALL_INTR      0xff
-
-#define  OCTEP_IQ_INTR_RESEND_BIT  59
-#define  OCTEP_OQ_INTR_RESEND_BIT  59
+#define  OCTEP_VF_IQ_INTR_RESEND_BIT  59
+#define  OCTEP_VF_OQ_INTR_RESEND_BIT  59
 
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
@@ -220,12 +214,12 @@ struct octep_vf_device {
 	/* pkind value to be used in every Tx hardware descriptor */
 	u8 pkind;
 	/* Pointers to Octeon Tx queues */
-	struct octep_vf_iq *iq[OCTEP_MAX_IQ];
+	struct octep_vf_iq *iq[OCTEP_VF_MAX_IQ];
 
 	/* Rx queues (OQ: Output Queue) */
 	u16 num_oqs;
 	/* Pointers to Octeon Rx queues */
-	struct octep_vf_oq *oq[OCTEP_MAX_OQ];
+	struct octep_vf_oq *oq[OCTEP_VF_MAX_OQ];
 
 	/* Hardware port number of the PCIe interface */
 	u16 pcie_port;
@@ -239,7 +233,7 @@ struct octep_vf_device {
 	char *non_ioq_irq_names;
 	struct msix_entry *msix_entries;
 	/* IOq information of it's corresponding MSI-X interrupt. */
-	struct octep_vf_ioq_vector *ioq_vector[OCTEP_MAX_QUEUES];
+	struct octep_vf_ioq_vector *ioq_vector[OCTEP_VF_MAX_QUEUES];
 
 	/* Hardware Interface Tx statistics */
 	struct octep_vf_iface_tx_stats iface_tx_stats;
@@ -259,14 +253,14 @@ struct octep_vf_device {
 	u32 ctrl_mbox_ifstats_offset;
 };
 
-static inline u16 OCTEP_MAJOR_REV(struct octep_vf_device *oct)
+static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)
 {
 	u16 rev = (oct->rev_id & 0xC) >> 2;
 
 	return (rev == 0) ? 1 : rev;
 }
 
-static inline u16 OCTEP_MINOR_REV(struct octep_vf_device *oct)
+static inline u16 OCTEP_VF_MINOR_REV(struct octep_vf_device *oct)
 {
 	return (oct->rev_id & 0x3);
 }
@@ -300,4 +294,4 @@ void octep_vf_set_ethtool_ops(struct net_device *netdev);
 int octep_vf_get_link_info(struct octep_vf_device *oct);
 int octep_vf_get_if_stats(struct octep_vf_device *oct);
 void octep_vf_mbox_work(struct work_struct *work);
-#endif /* _OCTEP_MAIN_H_ */
+#endif /* _OCTEP_VF_MAIN_H_ */
