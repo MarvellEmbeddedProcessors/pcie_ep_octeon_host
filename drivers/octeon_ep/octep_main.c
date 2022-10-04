@@ -1153,7 +1153,7 @@ static void octep_remove(struct pci_dev *pdev)
 	cancel_work_sync(&oct->tx_timeout_task);
 	cancel_work_sync(&oct->ctrl_mbox_task);
 	oct->ctrl_mbox_timer_enabled = false;
-	del_timer(&oct->ctrl_mbox_timer);
+	del_timer_sync(&oct->ctrl_mbox_timer);
 	netdev = oct->netdev;
 
 	if (netdev->reg_state == NETREG_REGISTERED)
