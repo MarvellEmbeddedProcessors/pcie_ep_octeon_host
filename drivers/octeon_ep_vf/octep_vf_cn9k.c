@@ -252,9 +252,7 @@ static void octep_vf_setup_oq_regs_cn93(struct octep_vf_device *oct, int oq_no)
 /* Setup registers for a VF mailbox */
 static void octep_vf_setup_mbox_regs_cn93(struct octep_vf_device *oct, int q_no)
 {
-	struct octep_vf_mbox *mbox = oct->mbox[q_no];
-
-	mbox->q_no = q_no;
+	struct octep_vf_mbox *mbox = oct->mbox;
 
 	/* PF to VF DATA reg. VF reads from this reg */
 	mbox->mbox_read_reg = oct->mmio.hw_addr + CN93_VF_SDP_R_MBOX_PF_VF_DATA(q_no);
@@ -269,12 +267,10 @@ static void octep_vf_setup_mbox_regs_cn93(struct octep_vf_device *oct, int q_no)
 /* Mailbox Interrupt handler */
 static void cn93_handle_vf_mbox_intr(struct octep_vf_device *oct)
 {
-	int ring = 0;
-
-	if (oct->mbox[ring])
-		schedule_work(&oct->mbox[ring]->wk.work);
+	if (oct->mbox)
+		schedule_work(&oct->mbox->wk.work);
 	else
-		dev_err(&oct->pdev->dev, "%s bad mbox vf %d\n", __func__, ring);
+		dev_err(&oct->pdev->dev, "cannot schedule work on invalid mbox\n");
 }
 
 /* Tx/Rx queue interrupt handler */
@@ -285,10 +281,10 @@ static irqreturn_t octep_vf_ioq_intr_handler_cn93(void *data)
 	struct octep_vf_device *oct = vector->octep_vf_dev;
 	u64 reg_val = 0ULL;
 
-	/* Check PF to VF mailbox interrupt signal by checking 1st bit of queue zero */
+	/* Mailbox interrupt arrives along with interrupt of tx/rx ring pair 0 */
 	if (oq->q_no == 0) {
 		reg_val = octep_vf_read_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0));
-		if (reg_val & CN93_VF_INTR_MBOX_STATUS) {
+		if (reg_val & CN93_VF_SDP_R_MBOX_PF_VF_INT_STATUS) {
 			cn93_handle_vf_mbox_intr(oct);
 			octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0), reg_val);
 		}
@@ -332,19 +328,19 @@ static void octep_vf_enable_interrupts_cn93(struct octep_vf_device *oct)
 		octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_INT_LEVELS(q), reg_val);
 	}
 	/* Enable PF to VF mbox interrupt by setting 2nd bit*/
-	octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0), CN93_VF_INTR_MBOX_ENABLE);
+	octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0),
+			     CN93_VF_SDP_R_MBOX_PF_VF_INT_ENAB);
 }
 
 /* Disable all interrupts */
 static void octep_vf_disable_interrupts_cn93(struct octep_vf_device *oct)
 {
-	int num_rings, q, mbox_ring = 0;
+	int num_rings, q;
 	u64 reg_val;
 
 	/* Disable PF to VF mbox interrupt by setting 2nd bit*/
-	if (oct->mbox[mbox_ring])
-		octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0),
-				     CN93_VF_INTR_MBOX_DISABLE);
+	if (oct->mbox)
+		octep_vf_write_csr64(oct, CN93_VF_SDP_R_MBOX_PF_VF_INT(0), 0x0);
 
 	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
 	for (q = 0; q < num_rings; q++) {

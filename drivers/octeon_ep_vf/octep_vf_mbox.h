@@ -28,10 +28,10 @@ enum octep_pfvf_mbox_word_type {
 };
 
 enum octep_pfvf_mbox_cmd_status {
-	OCTEP_PFVF_MBOX_STATUS_NOT_SETUP = 1,
-	OCTEP_PFVF_MBOX_STATUS_TIMEDOUT = 2,
-	OCTEP_PFVF_MBOX_STATUS_RCV_NACK = 3,
-	OCTEP_PFVF_MBOX_STATUS_BUSY = 4
+	OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP = 1,
+	OCTEP_PFVF_MBOX_CMD_STATUS_TIMEDOUT = 2,
+	OCTEP_PFVF_MBOX_CMD_STATUS_NACK = 3,
+	OCTEP_PFVF_MBOX_CMD_STATUS_BUSY = 4
 };
 
 enum octep_pfvf_mbox_state {
@@ -47,10 +47,7 @@ enum octep_pfvf_link_status {
 enum octep_pfvf_link_speed {
 	OCTEP_PFVF_LINK_SPEED_NONE,
 	OCTEP_PFVF_LINK_SPEED_1000,
-	OCTEP_PFVF_LINK_SPEED_2500,
-	OCTEP_PFVF_LINK_SPEED_5000,
 	OCTEP_PFVF_LINK_SPEED_10000,
-	OCTEP_PFVF_LINK_SPEED_20000,
 	OCTEP_PFVF_LINK_SPEED_25000,
 	OCTEP_PFVF_LINK_SPEED_40000,
 	OCTEP_PFVF_LINK_SPEED_50000,
@@ -128,7 +125,7 @@ int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_wo
 			   union octep_pfvf_mbox_word *rsp);
 int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_opcode opcode,
 			    u8 *data, int *size);
-int octep_vf_mbox_send_set_mtu(struct octep_vf_device *oct, int mtu);
+int octep_vf_mbox_set_mtu(struct octep_vf_device *oct, int mtu);
 int octep_vf_mbox_set_mac_addr(struct octep_vf_device *oct, char *mac_addr);
 int octep_vf_mbox_get_mac_addr(struct octep_vf_device *oct, char *mac_addr);
 #endif

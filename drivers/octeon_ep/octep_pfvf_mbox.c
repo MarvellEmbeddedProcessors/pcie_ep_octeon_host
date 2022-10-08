@@ -137,7 +137,6 @@ static void octep_pfvf_pf_get_data(struct octep_device *oct,
 		 * specific API should be called to fetch
 		 * the requested data
 		 */
-
 		*((int32_t *)rsp->s_data.data) = mbox->message_len;
 		return;
 	}

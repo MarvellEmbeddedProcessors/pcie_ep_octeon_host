@@ -131,9 +131,6 @@
 #define    CN93_VF_R_OUT_CTL_NSR_P                   (1ULL << 25)
 #define    CN93_VF_R_OUT_CTL_ROR_P                   (1ULL << 24)
 #define    CN93_VF_R_OUT_CTL_IMODE                   (1ULL << 23)
-#define    CN93_VF_INTR_MBOX_ENABLE                  (1ULL << 1)
-#define    CN93_VF_INTR_MBOX_DISABLE                 (0ULL << 1)
-#define    CN93_VF_INTR_MBOX_STATUS                  (1ULL << 0)
 
 /* ##################### Mail Box Registers ########################## */
 /* SDP PF to VF Mailbox Data Register */
@@ -142,6 +139,9 @@
 #define    CN93_VF_SDP_R_MBOX_PF_VF_INT_START     0x10220
 /* SDP VF to PF Mailbox Data Register */
 #define    CN93_VF_SDP_R_MBOX_VF_PF_DATA_START    0x10230
+
+#define    CN93_VF_SDP_R_MBOX_PF_VF_INT_ENAB         (1ULL << 1)
+#define    CN93_VF_SDP_R_MBOX_PF_VF_INT_STATUS       (1ULL << 0)
 
 #define    CN93_VF_SDP_R_MBOX_PF_VF_DATA(ring)          \
 	(CN93_VF_SDP_R_MBOX_PF_VF_DATA_START + ((ring) * CN93_VF_RING_OFFSET))

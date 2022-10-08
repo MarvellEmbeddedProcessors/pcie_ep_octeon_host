@@ -67,10 +67,10 @@ struct octep_vf_hw_ops {
 
 /* Octeon mailbox data */
 struct octep_vf_mbox_data {
-	u32 total_len;
-	u32 recv_len;
-	u32 rsvd;
+	/* Holds the offset of received data via mailbox. */
 	u32 data_index;
+
+	/* Holds the received data via mailbox. */
 	u8 recv_data[OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE];
 };
 
@@ -85,7 +85,6 @@ struct octep_vf_mbox {
 	/* A spinlock to protect access to this q_mbox. */
 	spinlock_t lock;
 
-	u32 q_no;
 	u32 state;
 
 	/* SLI_MAC_PF_MBOX_INT for PF, SLI_PKT_MBOX_INT for VF. */
@@ -101,8 +100,10 @@ struct octep_vf_mbox {
 	 */
 	u8 __iomem *mbox_read_reg;
 
+	/* Octeon mailbox data */
 	struct octep_vf_mbox_data mbox_data;
 
+	/* Octeon mailbox work handler to process Mbox messages */
 	struct octep_vf_mbox_wk wk;
 };
 
@@ -244,7 +245,7 @@ struct octep_vf_device {
 	struct octep_vf_iface_link_info link_info;
 
 	/* Mailbox to talk to VFs */
-	struct octep_vf_mbox *mbox[OCTEP_MAX_VF];
+	struct octep_vf_mbox *mbox;
 
 	/* Work entry to handle Tx timeout */
 	struct work_struct tx_timeout_task;

@@ -729,7 +729,7 @@ int octep_vf_get_if_stats(struct octep_vf_device *oct)
 
 	memset(&vf_stats, 0, sizeof(struct ifla_vf_stats));
 	ret = octep_vf_mbox_bulk_read(oct, OCTEP_PFVF_MBOX_CMD_GET_STATS,
-					   (u8 *)&vf_stats, &size);
+				      (u8 *)&vf_stats, &size);
 	if (!ret) {
 		oct->iface_tx_stats.octs = vf_stats.tx_bytes;
 		oct->iface_tx_stats.pkts = vf_stats.tx_packets;
@@ -764,24 +764,17 @@ int octep_vf_get_link_info(struct octep_vf_device *oct)
 		dev_info(&oct->pdev->dev, "%s link status is Down\n", __func__);
 		return 0;
 	}
+
 	link_info->admin_up = OCTEP_PFVF_LINK_STATUS_UP;
 	link_info->oper_up = OCTEP_PFVF_LINK_STATUS_UP;
 	link_info->autoneg = (rsp.s_get_link.autoneg == OCTEP_PFVF_LINK_AUTONEG) ? 1 : 0;
+
 	switch (rsp.s_get_link.link_speed) {
 	case OCTEP_PFVF_LINK_SPEED_1000:
 		link_info->speed = 1000;
 		break;
-	case OCTEP_PFVF_LINK_SPEED_2500:
-		link_info->speed = 2500;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_5000:
-		link_info->speed = 5000;
-		break;
 	case OCTEP_PFVF_LINK_SPEED_10000:
 		link_info->speed = 10000;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_20000:
-		link_info->speed = 20000;
 		break;
 	case OCTEP_PFVF_LINK_SPEED_25000:
 		link_info->speed = 25000;
@@ -827,13 +820,14 @@ static void octep_vf_get_stats64(struct net_device *netdev,
 		rx_packets += oq->stats.packets;
 		rx_bytes += oq->stats.bytes;
 	}
-	octep_vf_get_if_stats(oct);
 	stats->tx_packets = tx_packets;
 	stats->tx_bytes = tx_bytes;
 	stats->rx_packets = rx_packets;
 	stats->rx_bytes = rx_bytes;
-	stats->multicast = oct->iface_rx_stats.mcast_pkts;
-	stats->rx_errors = oct->iface_rx_stats.err_pkts;
+	if (!octep_vf_get_if_stats(oct)) {
+		stats->multicast = oct->iface_rx_stats.mcast_pkts;
+		stats->rx_errors = oct->iface_rx_stats.err_pkts;
+	}
 }
 
 /**
@@ -911,7 +905,7 @@ static int octep_vf_change_mtu(struct net_device *netdev, int new_mtu)
 	if (link_info->mtu == new_mtu)
 		return 0;
 
-	err = octep_vf_mbox_send_set_mtu(oct, new_mtu);
+	err = octep_vf_mbox_set_mtu(oct, new_mtu);
 	if (!err) {
 		oct->link_info.mtu = new_mtu;
 		netdev->mtu = new_mtu;

@@ -14,16 +14,16 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 {
 	int ring = 0;
 
-	oct->mbox[ring] = vmalloc(sizeof(struct octep_vf_mbox));
-	if (!oct->mbox[ring])
+	oct->mbox = vmalloc(sizeof(struct octep_vf_mbox));
+	if (!oct->mbox)
 		return -1;
 
-	memset(oct->mbox[ring], 0, sizeof(struct octep_vf_mbox));
-	spin_lock_init(&oct->mbox[ring]->lock);
+	memset(oct->mbox, 0, sizeof(struct octep_vf_mbox));
+	spin_lock_init(&oct->mbox->lock);
 
 	oct->hw_ops.setup_mbox_regs(oct, ring);
-	INIT_WORK(&oct->mbox[ring]->wk.work, octep_vf_mbox_work);
-	oct->mbox[ring]->wk.ctxptr = oct;
+	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
+	oct->mbox->wk.ctxptr = oct;
 
 	dev_info(&oct->pdev->dev, "%s setup vf mbox successfully\n", __func__);
 	return 0;
@@ -32,11 +32,10 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 
 void octep_vf_delete_mbox(struct octep_vf_device *oct)
 {
-	int ring = 0;
-	if (work_pending(&oct->mbox[ring]->wk.work))
-		cancel_work_sync(&oct->mbox[ring]->wk.work);
-	vfree(oct->mbox[ring]);
-	oct->mbox[ring] = NULL;
+	if (work_pending(&oct->mbox->wk.work))
+		cancel_work_sync(&oct->mbox->wk.work);
+	vfree(oct->mbox);
+	oct->mbox = NULL;
 	dev_info(&oct->pdev->dev, "%s freed vf mbox struct.\n", __func__);
 }
 
@@ -47,11 +46,10 @@ void octep_vf_mbox_work(struct work_struct *work)
 	struct octep_vf_device *oct = NULL;
 	struct octep_vf_iface_link_info *link_info;
 	u64 pf_vf_data;
-	int ring = 0;
 
 	oct = (struct octep_vf_device *)wk->ctxptr;
 	link_info = &oct->link_info;
-	mbox = oct->mbox[ring];
+	mbox = oct->mbox;
 	pf_vf_data = readq(mbox->mbox_read_reg);
 	if (!(pf_vf_data & OCTEP_PFVF_LINK_STATUS_DOWN))
 		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_DOWN;
@@ -85,11 +83,11 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfv
 	volatile uint64_t reg_val = 0ull;
 	int count = 0;
 	long timeout = OCTEP_PFVF_MBOX_WRITE_WAIT_TIME;
-	struct octep_vf_mbox *mbox = oct->mbox[0];
+	struct octep_vf_mbox *mbox = oct->mbox;
 
 	if (!mbox) {
 		dev_err(&oct->pdev->dev, "%s Mbox is not initialized\n", __func__);
-		return OCTEP_PFVF_MBOX_STATUS_NOT_SETUP;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
 	}
 
 	cmd.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
@@ -106,11 +104,11 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfv
 	if (count == OCTEP_PFVF_MBOX_TIMEOUT_MS) {
 		dev_err(&oct->pdev->dev, "%s Timeout count:%d\n",
 					 __func__, count);
-		return OCTEP_PFVF_MBOX_STATUS_TIMEDOUT;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_TIMEDOUT;
 	}
 	if (rsp->s.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
 		dev_err(&oct->pdev->dev, "%s Received Mbox NACK from PF\n", __func__);
-		return OCTEP_PFVF_MBOX_STATUS_RCV_NACK;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_NACK;
 	}
 	rsp->u64 = reg_val;
 	return 0;
@@ -119,16 +117,16 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfv
 int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_word cmd,
 			   union octep_pfvf_mbox_word *rsp)
 {
-	int ring = 0, ret;
-	struct octep_vf_mbox *mbox = oct->mbox[ring];
+	int ret;
+	struct octep_vf_mbox *mbox = oct->mbox;
 
 	if (!mbox) {
 		dev_err(&oct->pdev->dev, "%s Mbox is not initialized\n", __func__);
-		return OCTEP_PFVF_MBOX_STATUS_NOT_SETUP;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
 	}
 	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY) {
 		dev_err(&oct->pdev->dev, "%s VF Mbox is in Busy state\n", __func__);
-		return OCTEP_PFVF_MBOX_STATUS_BUSY;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
 	}
 	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_BUSY);
 	ret = __octep_vf_mbox_send_cmd(oct, cmd, rsp);
@@ -143,16 +141,15 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	union octep_pfvf_mbox_word rsp;
 	int read_cnt, i = 0, ret;
 	int data_len = 0, tmp_len = 0;
-	int ring = 0;
-	struct octep_vf_mbox *mbox = oct->mbox[ring];
+	struct octep_vf_mbox *mbox = oct->mbox;
 
 	if (!mbox) {
 		dev_err(&oct->pdev->dev, "%s Mbox is not initialized\n", __func__);
-		return OCTEP_PFVF_MBOX_STATUS_NOT_SETUP;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
 	}
 	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY) {
 		dev_err(&oct->pdev->dev, "%s VF Mbox is in Busy state\n", __func__);
-		return OCTEP_PFVF_MBOX_STATUS_BUSY;
+		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
 	}
 	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_BUSY);
 	cmd.u64 = 0;
@@ -209,7 +206,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	return 0;
 }
 
-int octep_vf_mbox_send_set_mtu(struct octep_vf_device *oct, int mtu)
+int octep_vf_mbox_set_mtu(struct octep_vf_device *oct, int mtu)
 {
 	int frame_size = mtu + ETH_HLEN + ETH_FCS_LEN;
 	union octep_pfvf_mbox_word cmd;
