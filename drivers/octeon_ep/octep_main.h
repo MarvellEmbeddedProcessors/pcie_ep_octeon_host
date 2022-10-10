@@ -201,6 +201,16 @@ struct octep_pfvf_info {
 	u8 mac_addr[ETH_ALEN];
 };
 
+/* Device status */
+enum octep_dev_status {
+	OCTEP_DEV_STATUS_INVALID,
+	OCTEP_DEV_STATUS_ALLOC,
+	OCTEP_DEV_STATUS_WAIT_FOR_FW,
+	OCTEP_DEV_STATUS_INIT,
+	OCTEP_DEV_STATUS_READY,
+	OCTEP_DEV_STATUS_UNINIT
+};
+
 /* The Octeon device specific private data structure.
  * Each Octeon device has this structure to represent all its components.
  */
@@ -294,6 +304,11 @@ struct octep_device {
 	/* VFs info */
 	struct octep_pfvf_info vf_info[OCTEP_MAX_VF];
 
+	/* Work entry to handle device setup */
+	struct work_struct dev_setup_task;
+
+	/* Device status */
+	atomic_t status;
 };
 
 static inline u16 OCTEP_MAJOR_REV(struct octep_device *oct)

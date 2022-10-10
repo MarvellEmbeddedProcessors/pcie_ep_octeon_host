@@ -948,7 +948,7 @@ static const char *octep_devid_to_str(struct octep_device *oct)
 int octep_device_setup(struct octep_device *oct)
 {
 	struct pci_dev *pdev = oct->pdev;
-	int i, ret;
+	int i, err;
 
 	/* allocate memory for oct->conf */
 	oct->conf = kzalloc(sizeof(*oct->conf), GFP_KERNEL);
@@ -983,9 +983,22 @@ int octep_device_setup(struct octep_device *oct)
 
 	oct->pkind = CFG_GET_IQ_PKIND(oct->conf);
 
-	ret = octep_ctrl_net_init(oct);
-	if (ret)
-		return ret;
+	err = octep_ctrl_net_init(oct);
+	if (err)
+		return err;
+
+	INIT_WORK(&oct->tx_timeout_task, octep_tx_timeout_task);
+	INIT_WORK(&oct->ctrl_mbox_task, octep_ctrl_mbox_task);
+	oct->ctrl_mbox_timer_enabled = true;
+	timer_setup(&oct->ctrl_mbox_timer, octep_ctrl_mbox_timer_func, 0);
+	mod_timer(&oct->ctrl_mbox_timer,
+		  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
+
+	err = octep_setup_pfvf_mbox(oct);
+	if (err) {
+		dev_err(&pdev->dev, " pfvf mailbox setup failed\n");
+		return err;
+	}
 
 	return 0;
 
@@ -1006,10 +1019,12 @@ static void octep_device_cleanup(struct octep_device *oct)
 
 	dev_info(&oct->pdev->dev, "Cleaning up Octeon Device ...\n");
 
-	for (i = 0; i < OCTEP_MAX_VF; i++) {
-		vfree(oct->mbox[i]);
-		oct->mbox[i] = NULL;
-	}
+	octep_delete_pfvf_mbox(oct);
+
+	cancel_work_sync(&oct->tx_timeout_task);
+	cancel_work_sync(&oct->ctrl_mbox_task);
+	oct->ctrl_mbox_timer_enabled = false;
+	del_timer_sync(&oct->ctrl_mbox_timer);
 
 	octep_ctrl_net_uninit(oct);
 
@@ -1021,6 +1036,100 @@ static void octep_device_cleanup(struct octep_device *oct)
 
 	kfree(oct->conf);
 	oct->conf = NULL;
+}
+
+#define FW_STATUS_VSEC_ID	0xA3
+#define FW_STATUS_READY 	1
+static u8 get_fw_ready_status(struct octep_device *oct)
+{
+	u32 pos = 0;
+	u16 vsec_id;
+	u8 status = 0;
+
+	while ((pos = pci_find_next_ext_capability(oct->pdev, pos,
+						   PCI_EXT_CAP_ID_VNDR))) {
+		pci_read_config_word(oct->pdev, pos + 4, &vsec_id);
+		if (vsec_id == FW_STATUS_VSEC_ID) {
+			pci_read_config_byte(oct->pdev, (pos + 8), &status);
+			dev_info(&oct->pdev->dev, "Firmware ready %u\n",
+				 status);
+			return status;
+		}
+	}
+	return 0;
+}
+
+/**
+ * octep_dev_setup_task - work queue task to setup octep device.
+ *
+ * @work: pointer to dev setup work_struct
+ *
+ * Wait for firmware to be ready, then continue with device setup.
+ * Check for module exit while waiting for firmware.
+ *
+ **/
+static void octep_dev_setup_task(struct work_struct *work)
+{
+	struct octep_device *oct = container_of(work, struct octep_device,
+						dev_setup_task);
+	struct net_device *netdev = oct->netdev;
+	u8 status;
+	int err;
+
+	atomic_set(&oct->status, OCTEP_DEV_STATUS_WAIT_FOR_FW);
+	while (true) {
+		status = get_fw_ready_status(oct);
+		if (status == FW_STATUS_READY)
+			break;
+
+		schedule_timeout_interruptible(HZ * 1);
+
+		if (atomic_read(&oct->status) >= OCTEP_DEV_STATUS_READY) {
+			dev_info(&oct->pdev->dev,
+				 "Stopping firmware ready work.\n");
+			return;
+		}
+	}
+
+	/* Do not free resources on failure. driver unload will
+	 * lead to freeing resources.
+	 */
+	atomic_set(&oct->status, OCTEP_DEV_STATUS_INIT);
+	err = octep_device_setup(oct);
+	if (err) {
+		dev_err(&oct->pdev->dev, "Device setup failed\n");
+		atomic_set(&oct->status, OCTEP_DEV_STATUS_ALLOC);
+		return;
+	}
+
+	netdev->netdev_ops = &octep_netdev_ops;
+	octep_set_ethtool_ops(netdev);
+	netif_carrier_off(netdev);
+
+	netdev->hw_features = NETIF_F_SG;
+	netdev->features |= netdev->hw_features;
+	netdev->min_mtu = OCTEP_MIN_MTU;
+	netdev->max_mtu = OCTEP_MAX_MTU;
+	netdev->mtu = OCTEP_DEFAULT_MTU;
+
+	octep_ctrl_net_get_mac_addr(oct, OCTEP_CTRL_NET_INVALID_VFID,
+				    oct->mac_addr);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+	ether_addr_copy(netdev->dev_addr, oct->mac_addr);
+	ether_addr_copy(netdev->perm_addr, oct->mac_addr);
+#else
+	eth_hw_addr_set(netdev, oct->mac_addr);
+#endif
+
+	err = register_netdev(netdev);
+	if (err) {
+		dev_err(&oct->pdev->dev, "Failed to register netdev\n");
+		atomic_set(&oct->status, OCTEP_DEV_STATUS_INIT);
+		return;
+	}
+	atomic_set(&oct->status, OCTEP_DEV_STATUS_READY);
+
+	return;
 }
 
 /**
@@ -1074,55 +1183,13 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	octep_dev->dev = &pdev->dev;
 	pci_set_drvdata(pdev, octep_dev);
 
-	err = octep_device_setup(octep_dev);
-	if (err) {
-		dev_err(&pdev->dev, "Device setup failed\n");
-		goto err_octep_config;
-	}
-	INIT_WORK(&octep_dev->tx_timeout_task, octep_tx_timeout_task);
-	INIT_WORK(&octep_dev->ctrl_mbox_task, octep_ctrl_mbox_task);
-	octep_dev->ctrl_mbox_timer_enabled = true;
-	timer_setup(&octep_dev->ctrl_mbox_timer, octep_ctrl_mbox_timer_func, 0);
-	mod_timer(&octep_dev->ctrl_mbox_timer,
-		  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
+	atomic_set(&octep_dev->status, OCTEP_DEV_STATUS_ALLOC);
+	INIT_WORK(&octep_dev->dev_setup_task, octep_dev_setup_task);
+	queue_work(octep_wq, &octep_dev->dev_setup_task);
+	dev_info(&pdev->dev, "Device setup task queued\n");
 
-	netdev->netdev_ops = &octep_netdev_ops;
-	octep_set_ethtool_ops(netdev);
-	netif_carrier_off(netdev);
-
-	netdev->hw_features = NETIF_F_SG;
-	netdev->features |= netdev->hw_features;
-	netdev->min_mtu = OCTEP_MIN_MTU;
-	netdev->max_mtu = OCTEP_MAX_MTU;
-	netdev->mtu = OCTEP_DEFAULT_MTU;
-
-	octep_ctrl_net_get_mac_addr(octep_dev, OCTEP_CTRL_NET_INVALID_VFID,
-				    octep_dev->mac_addr);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
-	ether_addr_copy(netdev->dev_addr, octep_dev->mac_addr);
-	ether_addr_copy(netdev->perm_addr, octep_dev->mac_addr);
-#else
-	eth_hw_addr_set(netdev, octep_dev->mac_addr);
-#endif
-
-	err = register_netdev(netdev);
-	if (err) {
-		dev_err(&pdev->dev, "Failed to register netdev\n");
-		goto register_dev_err;
-	}
-	dev_info(&pdev->dev, "Device probe successful\n");
-
-	err = octep_setup_pfvf_mbox(octep_dev);
-	if (err) {
-		dev_err(&pdev->dev, "OCTEON: Mailbox setup failed\n");
-		goto register_dev_err;
-	}
 	return 0;
 
-register_dev_err:
-	octep_device_cleanup(octep_dev);
-err_octep_config:
-	free_netdev(netdev);
 err_alloc_netdev:
 	pci_disable_pcie_error_reporting(pdev);
 	pci_release_mem_regions(pdev);
@@ -1143,25 +1210,32 @@ err_dma_mask:
 static void octep_remove(struct pci_dev *pdev)
 {
 	struct octep_device *oct = pci_get_drvdata(pdev);
-	struct net_device *netdev;
+	int status;
 
 	if (!oct)
 		return;
 
-	octep_delete_pfvf_mbox(oct);
+	status = atomic_read(&oct->status);
+	if (status < OCTEP_DEV_STATUS_READY) {
+		dev_info(&oct->pdev->dev, "Cancelling device setup.\n");
+		atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
+		cancel_work_sync(&oct->dev_setup_task);
 
-	cancel_work_sync(&oct->tx_timeout_task);
-	cancel_work_sync(&oct->ctrl_mbox_task);
-	oct->ctrl_mbox_timer_enabled = false;
-	del_timer_sync(&oct->ctrl_mbox_timer);
-	netdev = oct->netdev;
+		if (status <= OCTEP_DEV_STATUS_WAIT_FOR_FW)
+			goto free_resources;
 
-	if (netdev->reg_state == NETREG_REGISTERED)
-		unregister_netdev(netdev);
+		goto cleanup_device;
+	}
 
+	dev_info(&oct->pdev->dev, "Removing device.\n");
+	if (oct->netdev->reg_state == NETREG_REGISTERED)
+		unregister_netdev(oct->netdev);
+
+cleanup_device:
 	octep_device_cleanup(oct);
+free_resources:
 	pci_release_mem_regions(pdev);
-	free_netdev(netdev);
+	free_netdev(oct->netdev);
 	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
 }

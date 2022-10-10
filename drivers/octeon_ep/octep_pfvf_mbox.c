@@ -113,6 +113,9 @@ void octep_delete_pfvf_mbox(struct octep_device *oct)
 
 	for (i = 0; i < num_vfs; i++) {
 		ring  = vf_srn + rings_per_vf * i;
+		if (!oct->mbox[ring])
+			continue;
+
 		if (work_pending(&oct->mbox[ring]->wk.work))
 			cancel_work_sync(&oct->mbox[ring]->wk.work);
 		vfree(oct->mbox[ring]);
