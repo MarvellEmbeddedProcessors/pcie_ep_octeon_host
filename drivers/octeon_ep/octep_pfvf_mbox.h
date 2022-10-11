@@ -8,14 +8,13 @@
 #define _OCTEP_PFVF_MBOX_H_
 
 
-#define OCTEP_PF_MBOX_VERSION 0
+#define OCTEP_PF_MBOX_VERSION 1
 
 enum octep_pfvf_mbox_opcode {
+	OCTEP_PFVF_MBOX_CMD_VERSION,
 	OCTEP_PFVF_MBOX_CMD_SET_MTU,
 	OCTEP_PFVF_MBOX_CMD_SET_MAC_ADDR,
 	OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR,
-	OCTEP_PFVF_MBOX_CMD_START_QUEUE,
-	OCTEP_PFVF_MBOX_CMD_STOP_QUEUE,
 	OCTEP_PFVF_MBOX_CMD_GET_LINK,
 	OCTEP_PFVF_MBOX_CMD_GET_STATS,
 	OCTEP_PFVF_MBOX_CMD_LAST,
@@ -87,6 +86,12 @@ union octep_pfvf_mbox_word {
 		u64 rsvd:5;
 		u8 data[6];
 	} s_data;
+	struct {
+		u64 opcode:8;
+		u64 type:2;
+		u64 rsvd:6;
+		u64 version:48;
+	} s_version;
 	struct {
 		u64 opcode:8;
 		u64 type:2;

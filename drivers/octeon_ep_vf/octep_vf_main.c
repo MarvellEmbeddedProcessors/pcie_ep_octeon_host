@@ -1091,17 +1091,28 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	err = register_netdev(netdev);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to register netdev\n");
-		goto register_dev_err;
+		goto err_register_dev;
 	}
-	err = octep_vf_setup_mbox(octep_vf_dev);
-	if (err) {
+
+	if (octep_vf_setup_mbox(octep_vf_dev)) {
 		dev_err(&pdev->dev, "VF Mailbox setup failed\n");
-		goto register_dev_err;
+		err = -ENOMEM;
+		goto err_setup_mbox;
+	}
+
+	if (octep_vf_mbox_version_check(octep_vf_dev)) {
+		dev_err(&pdev->dev, "PF VF Mailbox version mismatch\n");
+		err = -EINVAL;
+		goto err_mbox_version;
 	}
 	dev_info(&pdev->dev, "Device probe successful\n");
 	return 0;
 
-register_dev_err:
+err_mbox_version:
+	octep_vf_delete_mbox(octep_vf_dev);
+err_setup_mbox:
+	unregister_netdev(netdev);
+err_register_dev:
 	octep_vf_device_cleanup(octep_vf_dev);
 err_octep_vf_config:
 	free_netdev(netdev);
@@ -1111,6 +1122,7 @@ err_alloc_netdev:
 err_pci_regions:
 err_dma_mask:
 	pci_disable_device(pdev);
+	dev_err(&pdev->dev, "Device probe failed\n");
 	return err;
 }
 

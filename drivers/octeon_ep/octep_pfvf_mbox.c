@@ -21,6 +21,18 @@
 #include "octep_pfvf_mbox.h"
 #include "octep_ctrl_net.h"
 
+static void octep_pfvf_validate_version(struct octep_device *oct,  u32 vf_id,
+				    union octep_pfvf_mbox_word cmd,
+				    union octep_pfvf_mbox_word *rsp)
+{
+	u32 vf_version = (u32)cmd.s_version.version;
+
+	if (vf_version <= OCTEP_PF_MBOX_VERSION)
+		rsp->s_version.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+	else
+		rsp->s_version.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+}
+
 static void octep_pfvf_get_link_status(struct octep_device *oct, u32 vf_id,
 				      union octep_pfvf_mbox_word cmd,
 				      union octep_pfvf_mbox_word *rsp)
@@ -178,6 +190,9 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 	rsp.u64 = 0;
 
 	switch (cmd.s.opcode) {
+	case OCTEP_PFVF_MBOX_CMD_VERSION:
+		octep_pfvf_validate_version(oct, vf_id, cmd, &rsp);
+		break;
 	case OCTEP_PFVF_MBOX_CMD_GET_LINK:
 		octep_pfvf_get_link_status(oct, vf_id, cmd, &rsp);
 		break;
@@ -194,8 +209,8 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 		octep_pfvf_pf_get_data(oct, mbox, vf_id, cmd, &rsp);
 		break;
 	default:
-		dev_err(&oct->pdev->dev, "%s OCTEP_PFVF_MBOX_TYPE_RSP_NACK opcode:%d\n",
-					  __func__, cmd.s.opcode);
+		dev_err(&oct->pdev->dev, "OCTEP_PFVF_MBOX_TYPE_RSP_NACK opcode:%d\n",
+					  cmd.s.opcode);
 		rsp.s.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
 		break;
 	}

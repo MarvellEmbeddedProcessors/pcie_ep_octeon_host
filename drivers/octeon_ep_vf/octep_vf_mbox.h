@@ -11,11 +11,10 @@
 #define OCTEP_VF_MBOX_VERSION 0
 
 enum octep_pfvf_mbox_opcode {
+	OCTEP_PFVF_MBOX_CMD_VERSION,
 	OCTEP_PFVF_MBOX_CMD_SET_MTU,
 	OCTEP_PFVF_MBOX_CMD_SET_MAC_ADDR,
 	OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR,
-	OCTEP_PFVF_MBOX_CMD_START_QUEUE,
-	OCTEP_PFVF_MBOX_CMD_STOP_QUEUE,
 	OCTEP_PFVF_MBOX_CMD_GET_LINK,
 	OCTEP_PFVF_MBOX_CMD_GET_STATS,
 	OCTEP_PFVF_MBOX_CMD_LAST,
@@ -100,6 +99,12 @@ union octep_pfvf_mbox_word {
 		u64 opcode:8;
 		u64 type:2;
 		u64 rsvd:6;
+		u64 version:48;
+	} s_version;
+	struct {
+		u64 opcode:8;
+		u64 type:2;
+		u64 rsvd:6;
 		u8 mac_addr[6];
 	} s_set_mac;
 	struct {
@@ -128,4 +133,5 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 int octep_vf_mbox_set_mtu(struct octep_vf_device *oct, int mtu);
 int octep_vf_mbox_set_mac_addr(struct octep_vf_device *oct, char *mac_addr);
 int octep_vf_mbox_get_mac_addr(struct octep_vf_device *oct, char *mac_addr);
+int octep_vf_mbox_version_check(struct octep_vf_device *oct);
 #endif

@@ -25,18 +25,40 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
 	oct->mbox->wk.ctxptr = oct;
 
-	dev_info(&oct->pdev->dev, "%s setup vf mbox successfully\n", __func__);
+	dev_info(&oct->pdev->dev, "setup vf mbox successfully\n");
 	return 0;
 
 }
 
 void octep_vf_delete_mbox(struct octep_vf_device *oct)
 {
-	if (work_pending(&oct->mbox->wk.work))
-		cancel_work_sync(&oct->mbox->wk.work);
-	vfree(oct->mbox);
-	oct->mbox = NULL;
-	dev_info(&oct->pdev->dev, "%s freed vf mbox struct.\n", __func__);
+	if (oct->mbox) {
+		if (work_pending(&oct->mbox->wk.work))
+			cancel_work_sync(&oct->mbox->wk.work);
+		vfree(oct->mbox);
+		oct->mbox = NULL;
+		dev_info(&oct->pdev->dev, "Deleted vf mbox successfully\n");
+	}
+}
+
+int octep_vf_mbox_version_check(struct octep_vf_device *oct)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s_version.opcode = OCTEP_PFVF_MBOX_CMD_VERSION;
+	cmd.s_version.version = OCTEP_VF_MBOX_VERSION;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (!ret)
+		return 0;
+	if (ret == OCTEP_PFVF_MBOX_CMD_STATUS_NACK) {
+		dev_err(&oct->pdev->dev, "VF Mbox version:%x is not compatible with PF\n",
+					  (u32)cmd.s_version.version);
+		dev_err(&oct->pdev->dev, "Upgrade driver to compatibale version\n");
+	}
+	return ret;
 }
 
 void octep_vf_mbox_work(struct work_struct *work)
@@ -85,10 +107,8 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfv
 	long timeout = OCTEP_PFVF_MBOX_WRITE_WAIT_TIME;
 	struct octep_vf_mbox *mbox = oct->mbox;
 
-	if (!mbox) {
-		dev_err(&oct->pdev->dev, "%s Mbox is not initialized\n", __func__);
+	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
-	}
 
 	cmd.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
 	writeq(cmd.u64, mbox->mbox_write_reg);
@@ -120,10 +140,8 @@ int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_wo
 	int ret;
 	struct octep_vf_mbox *mbox = oct->mbox;
 
-	if (!mbox) {
-		dev_err(&oct->pdev->dev, "%s Mbox is not initialized\n", __func__);
+	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
-	}
 	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY) {
 		dev_err(&oct->pdev->dev, "%s VF Mbox is in Busy state\n", __func__);
 		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
@@ -143,10 +161,9 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	int data_len = 0, tmp_len = 0;
 	struct octep_vf_mbox *mbox = oct->mbox;
 
-	if (!mbox) {
-		dev_err(&oct->pdev->dev, "%s Mbox is not initialized\n", __func__);
+	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
-	}
+
 	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY) {
 		dev_err(&oct->pdev->dev, "%s VF Mbox is in Busy state\n", __func__);
 		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
