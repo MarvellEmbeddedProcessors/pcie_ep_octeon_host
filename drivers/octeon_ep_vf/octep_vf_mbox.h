@@ -73,7 +73,7 @@ struct octep_pfvf_mbox_link {
 	uint64_t rsvd:37;
 } __packed;
 
-#define OCTEP_PFVF_MBOX_TIMEOUT_MS     10
+#define OCTEP_PFVF_MBOX_TIMEOUT_MS     500
 #define OCTEP_PFVF_MBOX_MAX_RETRIES    2
 #define OCTEP_PFVF_MBOX_VERSION        0
 #define OCTEP_PFVF_MBOX_MAX_DATA_SIZE  6

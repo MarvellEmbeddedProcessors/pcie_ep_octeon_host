@@ -19,6 +19,7 @@
 #include "octep_config.h"
 #include "octep_main.h"
 #include "octep_pfvf_mbox.h"
+#include "octep_ctrl_net.h"
 
 static void octep_pfvf_get_link_status(struct octep_device *oct, u32 vf_id,
 				      union octep_pfvf_mbox_word cmd,
@@ -35,6 +36,7 @@ static void octep_pfvf_set_mtu(struct octep_device *oct, u32 vf_id,
 			       union octep_pfvf_mbox_word cmd,
 			       union octep_pfvf_mbox_word *rsp)
 {
+	octep_ctrl_net_set_mtu(oct, vf_id, cmd.s_set_mtu.mtu, true);
 	rsp->s_set_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 

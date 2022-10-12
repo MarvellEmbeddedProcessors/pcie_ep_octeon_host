@@ -78,6 +78,7 @@ struct octep_hw_ops {
 
 	void (*enable_interrupts)(struct octep_device *oct);
 	void (*disable_interrupts)(struct octep_device *oct);
+	int (*poll_non_ioq_interrupts)(struct octep_device *oct);
 
 	void (*enable_io_queues)(struct octep_device *oct);
 	void (*disable_io_queues)(struct octep_device *oct);
@@ -277,36 +278,30 @@ struct octep_device {
 
 	/* Mailbox to talk to VFs */
 	struct octep_mbox *mbox[OCTEP_MAX_VF];
+	/* VFs info */
+	struct octep_pfvf_info vf_info[OCTEP_MAX_VF];
 
 	/* Work entry to handle Tx timeout */
 	struct work_struct tx_timeout_task;
 
 	/* control mbox over pf */
 	struct octep_ctrl_mbox ctrl_mbox;
-
 	/* offset for iface stats */
 	u32 ctrl_mbox_ifstats_offset;
-
-	/* Work entry to handle ctrl mbox interrupt */
+	/* Work entry to process ctrl mbox */
 	struct work_struct ctrl_mbox_task;
-
 	/* Wait queue for host to firmware requests */
 	wait_queue_head_t ctrl_req_wait_q;
-
 	/* List of objects waiting for h2f response */
 	struct list_head ctrl_req_wait_list;
 
-	/* timer to receive mbox msgs while pf interface is down */
-	struct timer_list ctrl_mbox_timer;
-
-	bool ctrl_mbox_timer_enabled;
-
-	/* VFs info */
-	struct octep_pfvf_info vf_info[OCTEP_MAX_VF];
+	/* Enable non-ioq interrupt polling */
+	bool poll_non_ioq_intr;
+	/* Work entry to poll non-ioq interrupts */
+	struct delayed_work intr_poll_task;
 
 	/* Work entry to handle device setup */
 	struct work_struct dev_setup_task;
-
 	/* Device status */
 	atomic_t status;
 };

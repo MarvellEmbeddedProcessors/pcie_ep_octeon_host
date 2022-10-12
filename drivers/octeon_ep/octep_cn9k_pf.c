@@ -365,34 +365,64 @@ static void octep_setup_mbox_regs_cn93_pf(struct octep_device *oct, int q_no)
 
 }
 
-/* Mailbox Interrupt handler */
-static void cn93_handle_pf_mbox_intr(struct octep_device *oct,
-				     uint64_t reg_rint0_val,
-				     uint64_t reg_rint1_val)
+/* Process non-ioq interrupts required to keep pf interface running.
+ * OEI_RINT is needed for control mailbox
+ * MBOX_RINT is needed for pfvf mailbox
+ */
+static int octep_poll_non_ioq_interrupts_cn93_pf(struct octep_device *oct)
 {
-	u32 vf = 0;
-	u32 active_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
-	u32 active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
-	u32 vf_mbox_queue_num;
+	u32 vf, active_vfs, active_rings_per_vf, vf_mbox_queue;
+	u64 reg0, reg1;
+	int handled = 0;
 
-	if (reg_rint0_val) {
+	reg0 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(0));
+	reg1 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(1));
+	if (reg0 || reg1) {
+		dev_info(&oct->pdev->dev,
+			 "Received MBOX_RINT intr: reg0 0x%llx reg1 0x%llx\n",
+			 reg0, reg1);
+
+		active_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
+		active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
 		for (vf = 0; vf < active_vfs; vf++) {
-			vf_mbox_queue_num = vf * active_rings_per_vf;
-			if (reg_rint0_val & (0x1UL << vf_mbox_queue_num)) {
-				if (oct->mbox[vf_mbox_queue_num])
-					schedule_work(&oct->mbox[vf_mbox_queue_num]->wk.work);
-				else
-					dev_err(&oct->pdev->dev, "bad mbox vf %d\n", vf);
+			vf_mbox_queue = vf * active_rings_per_vf;
+			if (!(reg0 & (0x1UL << vf_mbox_queue)))
+				continue;
+
+			if (!oct->mbox[vf_mbox_queue]) {
+				dev_err(&oct->pdev->dev, "bad mbox vf %d\n", vf);
+				continue;
 			}
+			schedule_work(&oct->mbox[vf_mbox_queue]->wk.work);
 		}
+		if (reg0)
+			octep_write_csr64(oct, CN93_SDP_EPF_MBOX_RINT(0), reg0);
+		if (reg1)
+			octep_write_csr64(oct, CN93_SDP_EPF_MBOX_RINT(1), reg1);
+
+		handled = 1;
 	}
+	/* Check for OEI INTR */
+	reg0 = octep_read_csr64(oct, CN93_SDP_EPF_OEI_RINT);
+	if (reg0) {
+		dev_info(&oct->pdev->dev,
+			 "Received OEI_RINT intr: 0x%llx\n",
+			 reg0);
+		octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT, reg0);
+		if (reg0 & CN93_SDP_EPF_OEI_RINT_DATA_BIT_MBOX)
+			queue_work(octep_wq, &oct->ctrl_mbox_task);
+
+		handled = 1;
+	}
+
+	return handled;
 }
 
 /* Interrupts handler for all non-queue generic interrupts. */
 static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	u64 reg_val = 0, reg0 = 0, reg1 = 0;
+	u64 reg_val = 0;
 	struct pci_dev *pdev = oct->pdev;
 	int i = 0;
 
@@ -455,32 +485,9 @@ static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 		goto irq_handled;
 	}
 
-	/* Check for MBOX INTR */
-	reg0 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(0));
-	reg1 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(1));
-	if (reg0 || reg1) {
-		dev_info(&pdev->dev,
-			 "Received MBOX_RINT intr: reg0 0x%llx reg1 0x%llx\n",
-			 reg0, reg1);
-
-		cn93_handle_pf_mbox_intr(oct, reg0, reg1);
-		if (reg0)
-			octep_write_csr64(oct, CN93_SDP_EPF_MBOX_RINT(0), reg0);
-		if (reg1)
-			octep_write_csr64(oct, CN93_SDP_EPF_MBOX_RINT(1), reg1);
+	/* Check for MBOX INTR and OEI INTR */
+	if (octep_poll_non_ioq_interrupts_cn93_pf(oct))
 		goto irq_handled;
-	}
-
-	/* Check for OEI INTR */
-	reg_val = octep_read_csr64(oct, CN93_SDP_EPF_OEI_RINT);
-	if (reg_val) {
-		dev_info(&pdev->dev, "Received OEI_RINT intr: 0x%llx\n", reg_val);
-		octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT, reg_val);
-		if (reg_val & CN93_SDP_EPF_OEI_RINT_DATA_BIT_MBOX)
-			queue_work(octep_wq, &oct->ctrl_mbox_task);
-
-		goto irq_handled;
-	}
 
 	/* Check for DMA INTR */
 	reg_val = octep_read_csr64(oct, CN93_SDP_EPF_DMA_RINT);
@@ -743,6 +750,7 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 
 	oct->hw_ops.enable_interrupts = octep_enable_interrupts_cn93_pf;
 	oct->hw_ops.disable_interrupts = octep_disable_interrupts_cn93_pf;
+	oct->hw_ops.poll_non_ioq_interrupts = octep_poll_non_ioq_interrupts_cn93_pf;
 
 	oct->hw_ops.update_iq_read_idx = octep_update_iq_read_index_cn93_pf;
 

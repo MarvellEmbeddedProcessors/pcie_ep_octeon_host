@@ -20,7 +20,7 @@
 #include "octep_ctrl_net.h"
 #include "octep_pfvf_mbox.h"
 
-#define OCTEP_MBOX_TIMER_MS	100
+#define OCTEP_INTR_POLL_TIME_MSECS		100
 
 struct workqueue_struct *octep_wq;
 
@@ -474,24 +474,6 @@ static void octep_link_up(struct net_device *netdev)
 }
 
 /**
- * octep_ctrl_mbox_timer_func - timer function to handle ctrl mbox messages.
- *
- * @work: pointer to ctrl mbox work_struct
- *
- * Poll ctrl mbox message queue and handle control messages from firmware.
- **/
-static void octep_ctrl_mbox_timer_func(struct timer_list *timer)
-{
-	struct octep_device *oct = from_timer(oct, timer, ctrl_mbox_timer);
-
-	if (oct->ctrl_mbox_timer_enabled) {
-		octep_ctrl_net_recv_fw_messages(oct);
-		mod_timer(&oct->ctrl_mbox_timer,
-			  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
-	}
-}
-
-/**
  * octep_open() - start the octeon network device.
  *
  * @netdev: pointer to kernel network device.
@@ -534,7 +516,7 @@ static int octep_open(struct net_device *netdev)
 				    false);
 	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, true,
 				       false);
-	oct->ctrl_mbox_timer_enabled = false;
+	oct->poll_non_ioq_intr = false;
 
 	/* Enable the input and output queues for this Octeon device */
 	oct->hw_ops.enable_io_queues(oct);
@@ -601,9 +583,9 @@ static int octep_stop(struct net_device *netdev)
 	octep_free_oqs(oct);
 	octep_free_iqs(oct);
 
-	oct->ctrl_mbox_timer_enabled = true;
-	mod_timer(&oct->ctrl_mbox_timer,
-		  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
+	oct->poll_non_ioq_intr = true;
+	queue_delayed_work(octep_wq, &oct->intr_poll_task,
+			   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
 
 	netdev_info(netdev, "Device stopped !!\n");
 	return 0;
@@ -910,16 +892,49 @@ static const struct net_device_ops octep_netdev_ops = {
 };
 
 /**
- * octep_ctrl_mbox_task - work queue task to handle ctrl mbox messages.
+ * octep_intr_poll_task - work queue task to process non-ioq interrupts.
  *
- * @work: pointer to ctrl mbox work_struct
+ * @work: pointer to mbox work_struct
  *
- * Poll ctrl mbox message queue and handle control messages from firmware.
+ * Process non-ioq interrupts to handle control mailbox, pfvf mailbox.
+ **/
+static void octep_intr_poll_task(struct work_struct *work)
+{
+	struct octep_device *oct = container_of(work, struct octep_device,
+						intr_poll_task.work);
+	int status;
+
+	status = atomic_read(&oct->status);
+	if (status != OCTEP_DEV_STATUS_INIT &&
+	    status != OCTEP_DEV_STATUS_READY) {
+		dev_err(&oct->pdev->dev, "pf interrupt poll task stopped.\n");
+		return;
+	}
+
+	if (oct->poll_non_ioq_intr) {
+		oct->hw_ops.poll_non_ioq_interrupts(oct);
+		queue_delayed_work(octep_wq, &oct->intr_poll_task,
+				   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
+	}
+}
+
+/**
+ * octep_ctrl_mbox_task - work queue task to process ctrl mbox messages.
+ *
+ * @work: pointer to mbox work_struct
+ *
+ * Poll ctrl mailbox and process messages.
  **/
 static void octep_ctrl_mbox_task(struct work_struct *work)
 {
 	struct octep_device *oct = container_of(work, struct octep_device,
 						ctrl_mbox_task);
+	int status;
+
+	status = atomic_read(&oct->status);
+	if (status != OCTEP_DEV_STATUS_INIT &&
+	    status != OCTEP_DEV_STATUS_READY)
+		return;
 
 	octep_ctrl_net_recv_fw_messages(oct);
 }
@@ -987,18 +1002,19 @@ int octep_device_setup(struct octep_device *oct)
 	if (err)
 		return err;
 
-	INIT_WORK(&oct->tx_timeout_task, octep_tx_timeout_task);
-	INIT_WORK(&oct->ctrl_mbox_task, octep_ctrl_mbox_task);
-	oct->ctrl_mbox_timer_enabled = true;
-	timer_setup(&oct->ctrl_mbox_timer, octep_ctrl_mbox_timer_func, 0);
-	mod_timer(&oct->ctrl_mbox_timer,
-		  jiffies + msecs_to_jiffies(OCTEP_MBOX_TIMER_MS));
-
 	err = octep_setup_pfvf_mbox(oct);
 	if (err) {
 		dev_err(&pdev->dev, " pfvf mailbox setup failed\n");
+		octep_ctrl_net_uninit(oct);
 		return err;
 	}
+
+	INIT_WORK(&oct->tx_timeout_task, octep_tx_timeout_task);
+	INIT_WORK(&oct->ctrl_mbox_task, octep_ctrl_mbox_task);
+	INIT_DELAYED_WORK(&oct->intr_poll_task, octep_intr_poll_task);
+	oct->poll_non_ioq_intr = true;
+	queue_delayed_work(octep_wq, &oct->intr_poll_task,
+			   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
 
 	return 0;
 
@@ -1019,13 +1035,11 @@ static void octep_device_cleanup(struct octep_device *oct)
 
 	dev_info(&oct->pdev->dev, "Cleaning up Octeon Device ...\n");
 
-	octep_delete_pfvf_mbox(oct);
-
 	cancel_work_sync(&oct->tx_timeout_task);
 	cancel_work_sync(&oct->ctrl_mbox_task);
-	oct->ctrl_mbox_timer_enabled = false;
-	del_timer_sync(&oct->ctrl_mbox_timer);
-
+	oct->poll_non_ioq_intr = false;
+	cancel_delayed_work_sync(&oct->intr_poll_task);
+	octep_delete_pfvf_mbox(oct);
 	octep_ctrl_net_uninit(oct);
 
 	oct->hw_ops.soft_reset(oct);
@@ -1128,6 +1142,7 @@ static void octep_dev_setup_task(struct work_struct *work)
 		return;
 	}
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_READY);
+	dev_info(&oct->pdev->dev, "Device setup successful\n");
 
 	return;
 }
@@ -1185,7 +1200,7 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	atomic_set(&octep_dev->status, OCTEP_DEV_STATUS_ALLOC);
 	INIT_WORK(&octep_dev->dev_setup_task, octep_dev_setup_task);
-	queue_work(octep_wq, &octep_dev->dev_setup_task);
+	schedule_work(&octep_dev->dev_setup_task);
 	dev_info(&pdev->dev, "Device setup task queued\n");
 
 	return 0;
