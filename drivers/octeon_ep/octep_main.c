@@ -891,6 +891,53 @@ static const struct net_device_ops octep_netdev_ops = {
 	.ndo_change_mtu          = octep_change_mtu,
 };
 
+/* Cancel all tasks except hb task */
+static void cancel_all_tasks(struct octep_device *oct)
+{
+	cancel_work_sync(&oct->tx_timeout_task);
+	cancel_work_sync(&oct->ctrl_mbox_task);
+	oct->poll_non_ioq_intr = false;
+	cancel_delayed_work_sync(&oct->intr_poll_task);
+	octep_delete_pfvf_mbox(oct);
+	octep_ctrl_net_uninit(oct);
+}
+
+/**
+ * octep_hb_timeout_task - work queue task to check firmware heartbeat.
+ *
+ * @work: pointer to hb work_struct
+ *
+ * Check for heartbeat miss count. Uninitialize oct device if miss count
+ * exceeds configured max heartbeat miss count.
+ *
+ **/
+static void octep_hb_timeout_task(struct work_struct *work)
+{
+	struct octep_device *oct = container_of(work, struct octep_device,
+						hb_task.work);
+
+	int status, miss_cnt;
+
+	status = atomic_read(&oct->status);
+	if (status != OCTEP_DEV_STATUS_INIT &&
+	    status != OCTEP_DEV_STATUS_READY)
+		return;
+
+	atomic_inc(&oct->hb_miss_cnt);
+	miss_cnt = atomic_read(&oct->hb_miss_cnt);
+	if (miss_cnt < oct->conf->max_hb_miss_cnt) {
+		queue_delayed_work(octep_wq, &oct->hb_task,
+				   msecs_to_jiffies(oct->conf->hb_interval * 1000));
+		return;
+	}
+
+	dev_err(&oct->pdev->dev, "Missed %u heartbeats. Uninitializing\n",
+		miss_cnt);
+	atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
+	cancel_all_tasks(oct);
+	unregister_netdev(oct->netdev);
+}
+
 /**
  * octep_intr_poll_task - work queue task to process non-ioq interrupts.
  *
@@ -905,17 +952,16 @@ static void octep_intr_poll_task(struct work_struct *work)
 	int status;
 
 	status = atomic_read(&oct->status);
-	if (status != OCTEP_DEV_STATUS_INIT &&
-	    status != OCTEP_DEV_STATUS_READY) {
-		dev_err(&oct->pdev->dev, "pf interrupt poll task stopped.\n");
+	if ((status != OCTEP_DEV_STATUS_INIT &&
+	     status != OCTEP_DEV_STATUS_READY) ||
+	    !oct->poll_non_ioq_intr) {
+		dev_info(&oct->pdev->dev, "Interrupt poll task stopped.\n");
 		return;
 	}
 
-	if (oct->poll_non_ioq_intr) {
-		oct->hw_ops.poll_non_ioq_interrupts(oct);
-		queue_delayed_work(octep_wq, &oct->intr_poll_task,
-				   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
-	}
+	oct->hw_ops.poll_non_ioq_interrupts(oct);
+	queue_delayed_work(octep_wq, &oct->intr_poll_task,
+			   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
 }
 
 /**
@@ -1016,6 +1062,10 @@ int octep_device_setup(struct octep_device *oct)
 	queue_delayed_work(octep_wq, &oct->intr_poll_task,
 			   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
 
+	atomic_set(&oct->hb_miss_cnt, 0);
+	INIT_DELAYED_WORK(&oct->hb_task, octep_hb_timeout_task);
+	queue_delayed_work(octep_wq, &oct->hb_task,
+			   msecs_to_jiffies(oct->conf->hb_interval * 1000));
 	return 0;
 
 unsupported_dev:
@@ -1034,13 +1084,8 @@ static void octep_device_cleanup(struct octep_device *oct)
 	int i;
 
 	dev_info(&oct->pdev->dev, "Cleaning up Octeon Device ...\n");
-
-	cancel_work_sync(&oct->tx_timeout_task);
-	cancel_work_sync(&oct->ctrl_mbox_task);
-	oct->poll_non_ioq_intr = false;
-	cancel_delayed_work_sync(&oct->intr_poll_task);
-	octep_delete_pfvf_mbox(oct);
-	octep_ctrl_net_uninit(oct);
+	cancel_all_tasks(oct);
+	cancel_delayed_work_sync(&oct->hb_task);
 
 	oct->hw_ops.soft_reset(oct);
 	for (i = 0; i < OCTEP_MMIO_REGIONS; i++) {
@@ -1230,24 +1275,21 @@ static void octep_remove(struct pci_dev *pdev)
 	if (!oct)
 		return;
 
+	dev_info(&pdev->dev, "Removing device.\n");
 	status = atomic_read(&oct->status);
-	if (status < OCTEP_DEV_STATUS_READY) {
-		dev_info(&oct->pdev->dev, "Cancelling device setup.\n");
-		atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
+	if (status <= OCTEP_DEV_STATUS_ALLOC)
+		goto free_resources;
+
+	atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
+	if (status == OCTEP_DEV_STATUS_WAIT_FOR_FW) {
 		cancel_work_sync(&oct->dev_setup_task);
-
-		if (status <= OCTEP_DEV_STATUS_WAIT_FOR_FW)
-			goto free_resources;
-
-		goto cleanup_device;
+		goto free_resources;
 	}
-
-	dev_info(&oct->pdev->dev, "Removing device.\n");
 	if (oct->netdev->reg_state == NETREG_REGISTERED)
 		unregister_netdev(oct->netdev);
 
-cleanup_device:
 	octep_device_cleanup(oct);
+
 free_resources:
 	pci_release_mem_regions(pdev);
 	free_netdev(oct->netdev);
