@@ -220,9 +220,15 @@ static void octep_init_config_cn93_pf(struct octep_device *oct)
 	conf->sriov_cfg.vf_srn = CN93_SDP_EPF_RINFO_SRN(val);
 
 	val = octep_read_csr64(oct, CN93_SDP_MAC_PF_RING_CTL(oct->pcie_port));
-	conf->pf_ring_cfg.srn =  CN93_SDP_MAC_PF_RING_CTL_SRN(val);
-	conf->pf_ring_cfg.max_io_rings = CN93_SDP_MAC_PF_RING_CTL_RPPF(val);
-	conf->pf_ring_cfg.active_io_rings = conf->pf_ring_cfg.max_io_rings;
+	if (oct->chip_id == OCTEP_PCI_DEVICE_ID_CN98_PF) {
+		conf->pf_ring_cfg.srn =  CN98_SDP_MAC_PF_RING_CTL_SRN(val);
+		conf->pf_ring_cfg.max_io_rings = CN98_SDP_MAC_PF_RING_CTL_RPPF(val);
+		conf->pf_ring_cfg.active_io_rings = conf->pf_ring_cfg.max_io_rings;
+	} else {
+		conf->pf_ring_cfg.srn =  CN93_SDP_MAC_PF_RING_CTL_SRN(val);
+		conf->pf_ring_cfg.max_io_rings = CN93_SDP_MAC_PF_RING_CTL_RPPF(val);
+		conf->pf_ring_cfg.active_io_rings = conf->pf_ring_cfg.max_io_rings;
+	}
 	dev_info(&pdev->dev, "pf_srn=%u rpvf=%u nvfs=%u rppf=%u\n",
 		 conf->pf_ring_cfg.srn, conf->sriov_cfg.active_rings_per_vf,
 		 conf->sriov_cfg.active_vfs, conf->pf_ring_cfg.active_io_rings);
