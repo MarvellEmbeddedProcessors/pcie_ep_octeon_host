@@ -37,18 +37,60 @@ static void octep_pfvf_get_link_status(struct octep_device *oct, u32 vf_id,
 				      union octep_pfvf_mbox_word cmd,
 				      union octep_pfvf_mbox_word *rsp)
 {
-	rsp->s_get_link.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	rsp->s_get_link.link_status =  OCTEP_PFVF_LINK_STATUS_UP;
-	rsp->s_get_link.link_speed = OCTEP_PFVF_LINK_SPEED_10000;
-	rsp->s_get_link.duplex = OCTEP_PFVF_LINK_FULL_DUPLEX;
-	rsp->s_get_link.autoneg = OCTEP_PFVF_LINK_AUTONEG;
+	int status;
+
+	status = octep_ctrl_net_get_link_status(oct, vf_id);
+	if (status < 0) {
+		rsp->s_link_status.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Get VF link status failed via host control Mbox\n");
+		return;
+	}
+	rsp->s_link_status.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+	rsp->s_link_status.status = status;
+}
+
+static void octep_pfvf_set_link_status(struct octep_device *oct, u32 vf_id,
+				      union octep_pfvf_mbox_word cmd,
+				      union octep_pfvf_mbox_word *rsp)
+{
+	int err;
+
+	err = octep_ctrl_net_set_link_status(oct, vf_id, cmd.s_link_status.status, true);
+	if (err) {
+		rsp->s_link_status.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Set VF link status failed via host control Mbox\n");
+		return;
+	}
+	rsp->s_link_status.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+}
+
+static void octep_pfvf_set_rx_state(struct octep_device *oct, u32 vf_id,
+				      union octep_pfvf_mbox_word cmd,
+				      union octep_pfvf_mbox_word *rsp)
+{
+	int err;
+
+	err = octep_ctrl_net_set_rx_state(oct, vf_id, cmd.s_link_state.state, true);
+	if (err) {
+		rsp->s_link_state.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Set VF Rx link state failed via host control Mbox\n");
+		return;
+	}
+	rsp->s_link_state.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
 static void octep_pfvf_set_mtu(struct octep_device *oct, u32 vf_id,
 			       union octep_pfvf_mbox_word cmd,
 			       union octep_pfvf_mbox_word *rsp)
 {
-	octep_ctrl_net_set_mtu(oct, vf_id, cmd.s_set_mtu.mtu, true);
+	int err;
+
+	err = octep_ctrl_net_set_mtu(oct, vf_id, cmd.s_set_mtu.mtu, true);
+	if (err) {
+		rsp->s_set_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Set VF MTU failed via host control Mbox\n");
+		return;
+	}
 	rsp->s_set_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
@@ -56,14 +98,14 @@ static void octep_pfvf_set_mac_addr(struct octep_device *oct,  u32 vf_id,
 				    union octep_pfvf_mbox_word cmd,
 				    union octep_pfvf_mbox_word *rsp)
 {
-	u8 vf_mac_addr[6];
-	int i;
+	int err;
 
-	for (i = 0; i < OCTEP_PFVF_MBOX_MAX_DATA_SIZE; i++) {
-		vf_mac_addr[i] = cmd.s_set_mac.mac_addr[i];
-		oct->vf_info[vf_id].mac_addr[i] = cmd.s_set_mac.mac_addr[i];
+	err = octep_ctrl_net_set_mac_addr(oct, vf_id, cmd.s_set_mac.mac_addr, true);
+	if (err) {
+		rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Set VF MAC address failed via host control Mbox\n");
+		return;
 	}
-
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
@@ -71,12 +113,15 @@ static void octep_pfvf_get_mac_addr(struct octep_device *oct,  u32 vf_id,
 				    union octep_pfvf_mbox_word cmd,
 				    union octep_pfvf_mbox_word *rsp)
 {
-	int i;
+	int err;
 
-	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
-	for (i = 0; i < OCTEP_PFVF_MBOX_MAX_DATA_SIZE; i++) {
-		rsp->s_set_mac.mac_addr[i] = oct->vf_info[vf_id].mac_addr[i];
+	err = octep_ctrl_net_get_mac_addr(oct, vf_id, rsp->s_set_mac.mac_addr);
+	if (err) {
+		rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Get VF MAC address failed via host control Mbox\n");
+		return;
 	}
+	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
 int octep_setup_pfvf_mbox(struct octep_device *oct)
@@ -113,6 +158,7 @@ free_mbox:
 		i--;
 		ring  = rings_per_vf * i;
 		cancel_work_sync(&oct->mbox[ring]->wk.work);
+		mutex_destroy(&oct->mbox[ring]->lock);
 		vfree(oct->mbox[ring]);
 		oct->mbox[ring] = NULL;
 	}
@@ -144,6 +190,10 @@ static void octep_pfvf_pf_get_data(struct octep_device *oct,
 {
 	int length = 0;
 	int i = 0;
+	int err;
+	struct octep_iface_link_info link_info;
+	struct octep_iface_rx_stats rx_stats;
+	struct octep_iface_tx_stats tx_stats;
 
 	rsp->s_data.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 
@@ -154,6 +204,36 @@ static void octep_pfvf_pf_get_data(struct octep_device *oct,
 		 * specific API should be called to fetch
 		 * the requested data
 		 */
+		switch (cmd.s.opcode) {
+		case OCTEP_PFVF_MBOX_CMD_GET_LINK_INFO:
+			memset(&link_info, 0, sizeof(link_info));
+			err = octep_ctrl_net_get_link_info(oct, vf_id, &link_info);
+			if (!err) {
+				mbox->message_len = sizeof(link_info);
+				*((int32_t *)rsp->s_data.data) = mbox->message_len;
+				memcpy(mbox->config_data, (u8 *)&link_info, sizeof(link_info));
+			} else {
+				rsp->s_data.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+				return;
+			}
+			break;
+		case OCTEP_PFVF_MBOX_CMD_GET_STATS:
+			memset(&rx_stats, 0, sizeof(rx_stats));
+			memset(&tx_stats, 0, sizeof(tx_stats));
+			err = octep_ctrl_net_get_if_stats(oct, vf_id, &rx_stats, &tx_stats);
+			if (!err) {
+				mbox->message_len = sizeof(rx_stats) + sizeof(tx_stats);
+				*((int32_t *)rsp->s_data.data) = mbox->message_len;
+				memcpy(mbox->config_data, (u8 *)&rx_stats, sizeof(rx_stats));
+				memcpy(mbox->config_data + sizeof(rx_stats), (u8 *)&tx_stats,
+				       sizeof(tx_stats));
+
+			} else {
+				rsp->s_data.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+				return;
+			}
+			break;
+		}
 		*((int32_t *)rsp->s_data.data) = mbox->message_len;
 		return;
 	}
@@ -193,8 +273,14 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 	case OCTEP_PFVF_MBOX_CMD_VERSION:
 		octep_pfvf_validate_version(oct, vf_id, cmd, &rsp);
 		break;
-	case OCTEP_PFVF_MBOX_CMD_GET_LINK:
+	case OCTEP_PFVF_MBOX_CMD_GET_LINK_STATUS:
 		octep_pfvf_get_link_status(oct, vf_id, cmd, &rsp);
+		break;
+	case OCTEP_PFVF_MBOX_CMD_SET_LINK_STATUS:
+		octep_pfvf_set_link_status(oct, vf_id, cmd, &rsp);
+		break;
+	case OCTEP_PFVF_MBOX_CMD_SET_RX_STATE:
+		octep_pfvf_set_rx_state(oct, vf_id, cmd, &rsp);
 		break;
 	case OCTEP_PFVF_MBOX_CMD_SET_MTU:
 		octep_pfvf_set_mtu(oct, vf_id, cmd, &rsp);
@@ -205,6 +291,7 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 	case OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR:
 		octep_pfvf_get_mac_addr(oct, vf_id, cmd, &rsp);
 		break;
+	case OCTEP_PFVF_MBOX_CMD_GET_LINK_INFO:
 	case OCTEP_PFVF_MBOX_CMD_GET_STATS:
 		octep_pfvf_pf_get_data(oct, mbox, vf_id, cmd, &rsp);
 		break;

@@ -300,3 +300,66 @@ int octep_vf_mbox_get_mac_addr(struct octep_vf_device *oct, char *mac_addr)
 		mac_addr[i] = rsp.s_set_mac.mac_addr[i];
 	return 0;
 }
+
+int octep_vf_mbox_set_rx_state(struct octep_vf_device *oct, bool state)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s_link_state.opcode = OCTEP_PFVF_MBOX_CMD_SET_RX_STATE;
+	cmd.s_link_state.state = state;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (ret) {
+		dev_err(&oct->pdev->dev, "Set Rx state via VF Mbox send failed\n");
+		return ret;
+	}
+	if (rsp.s_link_state.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
+		dev_err(&oct->pdev->dev, "Set Rx state received NACK\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
+int octep_vf_mbox_set_link_status(struct octep_vf_device *oct, bool status)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s_link_status.opcode = OCTEP_PFVF_MBOX_CMD_SET_LINK_STATUS;
+	cmd.s_link_status.status = status;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (ret) {
+		dev_err(&oct->pdev->dev, "Set link status via VF Mbox send failed\n");
+		return ret;
+	}
+	if (rsp.s_link_status.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
+		dev_err(&oct->pdev->dev, "Set link status received NACK\n");
+		return -EINVAL;
+	}
+	return 0;
+}
+
+int octep_vf_mbox_get_link_status(struct octep_vf_device *oct, u8 *oper_up)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s_link_status.opcode = OCTEP_PFVF_MBOX_CMD_GET_LINK_STATUS;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (ret) {
+		dev_err(&oct->pdev->dev, "Get link status via VF Mbox send failed\n");
+		return ret;
+	}
+	if (rsp.s_link_status.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
+		dev_err(&oct->pdev->dev, "Get link status received NACK\n");
+		return -EINVAL;
+	}
+	*oper_up = rsp.s_link_status.status;
+	return 0;
+}

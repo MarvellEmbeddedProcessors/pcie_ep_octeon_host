@@ -15,8 +15,11 @@ enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_SET_MTU,
 	OCTEP_PFVF_MBOX_CMD_SET_MAC_ADDR,
 	OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR,
-	OCTEP_PFVF_MBOX_CMD_GET_LINK,
+	OCTEP_PFVF_MBOX_CMD_GET_LINK_INFO,
 	OCTEP_PFVF_MBOX_CMD_GET_STATS,
+	OCTEP_PFVF_MBOX_CMD_SET_RX_STATE,
+	OCTEP_PFVF_MBOX_CMD_SET_LINK_STATUS,
+	OCTEP_PFVF_MBOX_CMD_GET_LINK_STATUS,
 	OCTEP_PFVF_MBOX_CMD_LAST,
 };
 
@@ -107,12 +110,15 @@ union octep_pfvf_mbox_word {
 	struct {
 		u64 opcode:8;
 		u64 type:2;
-		u64 link_status:1;
-		u64 link_speed:8;
-		u64 duplex:1;
-		u64 autoneg:1;
-		u64 rsvd:43;
-	} s_get_link;
+		u64 state:1;
+		u64 rsvd:53;
+	} s_link_state;
+	struct {
+		u64 opcode:8;
+		u64 type:2;
+		u64 status:1;
+		u64 rsvd:53;
+	} s_link_status;
 } __packed;
 
 void octep_pfvf_mbox_work(struct work_struct *work);

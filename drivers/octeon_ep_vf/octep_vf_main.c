@@ -155,24 +155,6 @@ static void octep_vf_disable_msix(struct octep_vf_device *oct)
 	dev_info(&oct->pdev->dev, "Disabled MSI-X\n");
 }
 
-#if 0
-/* FIXME: Sathesh to check and remove this if not required for pf-vf mbox interrupts */
-/**
- * octep_vf_non_ioq_intr_handler() - common handler for all generic interrupts.
- *
- * @irq: Interrupt number.
- * @data: interrupt data.
- *
- * this is common handler for all non-queue (generic) interrupts.
- */
-static irqreturn_t octep_vf_non_ioq_intr_handler(int irq, void *data)
-{
-	struct octep_vf_device *oct = data;
-
-	return oct->hw_ops.non_ioq_intr_handler(oct);
-}
-#endif
-
 /**
  * octep_vf_ioq_intr_handler() - handler for all Tx/Rx queue interrupts.
  *
@@ -431,17 +413,32 @@ static void octep_vf_link_up(struct net_device *netdev)
  */
 static void octep_vf_set_rx_state(struct octep_vf_device *oct, bool up)
 {
+	int err = 0;
+
+	err = octep_vf_mbox_set_rx_state(oct, up);
+	if (err)
+		netdev_err(oct->netdev, "Set Rx state to %d failed with err:%d\n", err, up);
 }
 
 static int octep_vf_get_link_status(struct octep_vf_device *oct)
 {
-	/* FIXME: get the link state from PF (VF-PF) mailbox) ?? */
+	int err = 0;
+
+	err = octep_vf_mbox_get_link_status(oct, &oct->link_info.oper_up);
+	if (err)
+		netdev_err(oct->netdev, "Get link status failed with err:%d\n", err);
 	return oct->link_info.oper_up;
 }
 
 static void octep_vf_set_link_status(struct octep_vf_device *oct, bool up)
 {
-	/* FIXME: send mailbox command to PF ?? */
+	int err = 0;
+
+	err = octep_vf_mbox_set_link_status(oct, up);
+	if (err) {
+		netdev_err(oct->netdev, "Set link status to %d failed with err:%d\n", err, up);
+		return;
+	}
 	oct->link_info.oper_up = up;
 }
 
@@ -546,7 +543,6 @@ static int octep_vf_stop(struct net_device *netdev)
 	octep_vf_napi_delete(oct);
 
 	octep_vf_clean_irqs(oct);
-	octep_vf_delete_mbox(oct);
 	octep_vf_clean_iqs(oct);
 
 	oct->hw_ops.disable_io_queues(oct);
@@ -724,72 +720,30 @@ dma_map_err:
 
 int octep_vf_get_if_stats(struct octep_vf_device *oct)
 {
-	struct ifla_vf_stats vf_stats;
 	int ret = 0, size = 0;
+	struct octep_vf_iface_rxtx_stats vf_stats;
 
-	memset(&vf_stats, 0, sizeof(struct ifla_vf_stats));
+	memset(&vf_stats, 0, sizeof(struct octep_vf_iface_rxtx_stats));
 	ret = octep_vf_mbox_bulk_read(oct, OCTEP_PFVF_MBOX_CMD_GET_STATS,
 				      (u8 *)&vf_stats, &size);
 	if (!ret) {
-		oct->iface_tx_stats.octs = vf_stats.tx_bytes;
-		oct->iface_tx_stats.pkts = vf_stats.tx_packets;
-		oct->iface_tx_stats.dropped = vf_stats.tx_dropped;
-
-		oct->iface_rx_stats.octets = vf_stats.rx_bytes;
-		oct->iface_rx_stats.pkts = vf_stats.rx_packets;
-		oct->iface_rx_stats.mcast_pkts = vf_stats.multicast;
-		oct->iface_rx_stats.err_pkts = vf_stats.rx_dropped;
+		memcpy(&oct->iface_rx_stats, &vf_stats.iface_rx_stats,
+		       sizeof(struct octep_vf_iface_rx_stats));
+		memcpy(&oct->iface_tx_stats, &vf_stats.iface_tx_stats,
+		       sizeof(struct octep_vf_iface_tx_stats));
 	}
 	return ret;
 }
 
 int octep_vf_get_link_info(struct octep_vf_device *oct)
 {
-	union octep_pfvf_mbox_word cmd;
-	union octep_pfvf_mbox_word rsp;
-	int ret;
-	struct octep_vf_iface_link_info *link_info = &oct->link_info;
+	int ret, size;
 
-	cmd.u64 = 0;
-	cmd.s_set_mac.opcode = OCTEP_PFVF_MBOX_CMD_GET_LINK;
-	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	ret = octep_vf_mbox_bulk_read(oct, OCTEP_PFVF_MBOX_CMD_GET_LINK_INFO,
+				      (u8 *)&oct->link_info, &size);
 	if (ret) {
-		dev_err(&oct->pdev->dev, "%s Mbox send fail ret value:%d\n", __func__, ret);
+		dev_err(&oct->pdev->dev, "Get VF link info failed via VF Mbox\n");
 		return ret;
-	}
-
-	if (rsp.s_get_link.link_status == OCTEP_PFVF_LINK_STATUS_DOWN) {
-		link_info->admin_up = OCTEP_PFVF_LINK_STATUS_DOWN;
-		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_DOWN;
-		dev_info(&oct->pdev->dev, "%s link status is Down\n", __func__);
-		return 0;
-	}
-
-	link_info->admin_up = OCTEP_PFVF_LINK_STATUS_UP;
-	link_info->oper_up = OCTEP_PFVF_LINK_STATUS_UP;
-	link_info->autoneg = (rsp.s_get_link.autoneg == OCTEP_PFVF_LINK_AUTONEG) ? 1 : 0;
-
-	switch (rsp.s_get_link.link_speed) {
-	case OCTEP_PFVF_LINK_SPEED_1000:
-		link_info->speed = 1000;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_10000:
-		link_info->speed = 10000;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_25000:
-		link_info->speed = 25000;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_40000:
-		link_info->speed = 40000;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_50000:
-		link_info->speed = 50000;
-		break;
-	case OCTEP_PFVF_LINK_SPEED_100000:
-		link_info->speed = 100000;
-		break;
-	default:
-		link_info->speed = 0;
 	}
 	return 0;
 }
@@ -1005,11 +959,9 @@ static void octep_vf_device_cleanup(struct octep_vf_device *oct)
 	oct->conf = NULL;
 }
 
-/*TODO:FIXME: keep it in proper place
- */
 int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
 {
-	return 0;
+	return octep_vf_mbox_get_mac_addr(oct, addr);
 }
 
 /**
@@ -1080,20 +1032,6 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev->max_mtu = OCTEP_VF_MAX_MTU;
 	netdev->mtu = OCTEP_VF_DEFAULT_MTU;
 
-	octep_vf_get_mac_addr(octep_vf_dev, octep_vf_dev->mac_addr);
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
-	ether_addr_copy(netdev->dev_addr, octep_vf_dev->mac_addr);
-	ether_addr_copy(netdev->perm_addr, octep_vf_dev->mac_addr);
-#else
-	eth_hw_addr_set(netdev, octep_vf_dev->mac_addr);
-#endif
-
-	err = register_netdev(netdev);
-	if (err) {
-		dev_err(&pdev->dev, "Failed to register netdev\n");
-		goto err_register_dev;
-	}
-
 	if (octep_vf_setup_mbox(octep_vf_dev)) {
 		dev_err(&pdev->dev, "VF Mailbox setup failed\n");
 		err = -ENOMEM;
@@ -1105,14 +1043,26 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		err = -EINVAL;
 		goto err_mbox_version;
 	}
+
+	octep_vf_get_mac_addr(octep_vf_dev, octep_vf_dev->mac_addr);
+#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+	ether_addr_copy(netdev->dev_addr, octep_vf_dev->mac_addr);
+	ether_addr_copy(netdev->perm_addr, octep_vf_dev->mac_addr);
+#else
+	eth_hw_addr_set(netdev, octep_vf_dev->mac_addr);
+#endif
+	err = register_netdev(netdev);
+	if (err) {
+		dev_err(&pdev->dev, "Failed to register netdev\n");
+		goto err_register_dev;
+	}
 	dev_info(&pdev->dev, "Device probe successful\n");
 	return 0;
 
+err_register_dev:
 err_mbox_version:
 	octep_vf_delete_mbox(octep_vf_dev);
 err_setup_mbox:
-	unregister_netdev(netdev);
-err_register_dev:
 	octep_vf_device_cleanup(octep_vf_dev);
 err_octep_vf_config:
 	free_netdev(netdev);
@@ -1146,7 +1096,7 @@ static void octep_vf_remove(struct pci_dev *pdev)
 	netdev = oct->netdev;
 	if (netdev->reg_state == NETREG_REGISTERED)
 		unregister_netdev(netdev);
-
+	octep_vf_delete_mbox(oct);
 	octep_vf_device_cleanup(oct);
 	pci_release_mem_regions(pdev);
 	free_netdev(netdev);

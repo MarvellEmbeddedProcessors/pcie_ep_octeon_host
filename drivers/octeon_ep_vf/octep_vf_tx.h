@@ -45,11 +45,11 @@ struct octep_vf_tx_buffer {
 
 /* VF Hardware interface Tx statistics */
 struct octep_vf_iface_tx_stats {
-	/* Total octets sent on the interface */
-	u64 octs;
-
 	/* Total frames sent on the interface */
 	u64 pkts;
+
+	/* Total octets sent on the interface */
+	u64 octs;
 
 	/* Packets sent to a broadcast DMAC */
 	u64 bcst;
@@ -60,6 +60,9 @@ struct octep_vf_iface_tx_stats {
 	/* FIXME: review with team */
 	/* Packets dropped */
 	u64 dropped;
+
+	/* Reserved */
+	u64 reserved[13];
 };
 
 /* VF Input Queue statistics */

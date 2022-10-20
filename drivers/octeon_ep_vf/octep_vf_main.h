@@ -182,6 +182,15 @@ struct octep_vf_iface_link_info {
 	u8  oper_up;
 };
 
+/* Hardware interface stats information. */
+struct octep_vf_iface_rxtx_stats {
+	/* Hardware Interface Rx statistics */
+	struct octep_vf_iface_rx_stats iface_rx_stats;
+
+	/* Hardware Interface Tx statistics */
+	struct octep_vf_iface_tx_stats iface_tx_stats;
+};
+
 /* The Octeon device specific private data structure.
  * Each Octeon device has this structure to represent all its components.
  */

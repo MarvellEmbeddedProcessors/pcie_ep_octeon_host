@@ -99,7 +99,7 @@ struct octep_mbox_data {
 	u64 *data;
 };
 
-#define MAX_VF_PF_MBOX_DATA_SIZE 256
+#define MAX_VF_PF_MBOX_DATA_SIZE 384
 /* wrappers around work structs */
 struct octep_pfvf_mbox_wk {
 	struct work_struct work;

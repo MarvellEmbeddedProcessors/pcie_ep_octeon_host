@@ -45,6 +45,18 @@ struct octep_tx_buffer {
 
 /* Hardware interface Tx statistics */
 struct octep_iface_tx_stats {
+	/* Total frames sent on the interface */
+	u64 pkts;
+
+	/* Total octets sent on the interface */
+	u64 octs;
+
+	/* Packets sent to a broadcast DMAC */
+	u64 bcst;
+
+	/* Packets sent to the multicast DMAC */
+	u64 mcst;
+
 	/* Packets dropped due to excessive collisions */
 	u64 xscol;
 
@@ -60,12 +72,6 @@ struct octep_iface_tx_stats {
 	 * transmission
 	 */
 	u64 scol;
-
-	/* Total octets sent on the interface */
-	u64 octs;
-
-	/* Total frames sent on the interface */
-	u64 pkts;
 
 	/* Packets sent with an octet count < 64 */
 	u64 hist_lt64;
@@ -90,12 +96,6 @@ struct octep_iface_tx_stats {
 
 	/* Packets sent with an octet count of > 1518 */
 	u64 hist_gt1518;
-
-	/* Packets sent to a broadcast DMAC */
-	u64 bcst;
-
-	/* Packets sent to the multicast DMAC */
-	u64 mcst;
 
 	/* Packets sent that experienced a transmit underflow and were
 	 * truncated

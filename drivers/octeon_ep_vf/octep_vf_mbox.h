@@ -15,8 +15,11 @@ enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_SET_MTU,
 	OCTEP_PFVF_MBOX_CMD_SET_MAC_ADDR,
 	OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR,
-	OCTEP_PFVF_MBOX_CMD_GET_LINK,
+	OCTEP_PFVF_MBOX_CMD_GET_LINK_INFO,
 	OCTEP_PFVF_MBOX_CMD_GET_STATS,
+	OCTEP_PFVF_MBOX_CMD_SET_RX_STATE,
+	OCTEP_PFVF_MBOX_CMD_SET_LINK_STATUS,
+	OCTEP_PFVF_MBOX_CMD_GET_LINK_STATUS,
 	OCTEP_PFVF_MBOX_CMD_LAST,
 };
 
@@ -64,14 +67,6 @@ enum octep_pfvf_link_autoneg {
 	OCTEP_PFVF_LINK_FIXED,
 };
 
-struct octep_pfvf_mbox_link {
-	uint64_t link_status:1;
-	uint64_t link_speed:8;
-	uint64_t duplex:1;
-	uint64_t autoneg:1;
-	uint64_t rsvd:37;
-} __packed;
-
 #define OCTEP_PFVF_MBOX_TIMEOUT_MS     500
 #define OCTEP_PFVF_MBOX_MAX_RETRIES    2
 #define OCTEP_PFVF_MBOX_VERSION        0
@@ -116,12 +111,15 @@ union octep_pfvf_mbox_word {
 	struct {
 		u64 opcode:8;
 		u64 type:2;
-		u64 link_status:1;
-		u64 link_speed:8;
-		u64 duplex:1;
-		u64 autoneg:1;
-		u64 rsvd:43;
-	} s_get_link;
+		u64 state:1;
+		u64 rsvd:53;
+	} s_link_state;
+	struct {
+		u64 opcode:8;
+		u64 type:2;
+		u64 status:1;
+		u64 rsvd:53;
+	} s_link_status;
 } __packed;
 
 int octep_vf_setup_mbox(struct octep_vf_device *oct);
@@ -134,4 +132,7 @@ int octep_vf_mbox_set_mtu(struct octep_vf_device *oct, int mtu);
 int octep_vf_mbox_set_mac_addr(struct octep_vf_device *oct, char *mac_addr);
 int octep_vf_mbox_get_mac_addr(struct octep_vf_device *oct, char *mac_addr);
 int octep_vf_mbox_version_check(struct octep_vf_device *oct);
+int octep_vf_mbox_set_rx_state(struct octep_vf_device *oct, bool state);
+int octep_vf_mbox_set_link_status(struct octep_vf_device *oct, bool status);
+int octep_vf_mbox_get_link_status(struct octep_vf_device *oct, u8 *oper_up);
 #endif
