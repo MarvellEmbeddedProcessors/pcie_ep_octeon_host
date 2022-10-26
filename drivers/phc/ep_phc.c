@@ -68,7 +68,7 @@ static struct pci_driver octeon_ep_phc_pci_driver = {
 #ifdef PHC_DEBUG
 static u64 prev_offset;
 #endif
-static int oct_ep_ptp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
+static int oct_ep_ptp_gettime_cn9xxx(struct ptp_clock_info *ptp, struct timespec64 *ts)
 {
 	struct oct_ep_ptp_clock *ep_clk;
 	struct timespec64 tspec;
@@ -98,6 +98,79 @@ static int oct_ep_ptp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 	memcpy(ts, &tspec, sizeof(struct timespec64));
 	return 0;
 }
+
+static int oct_ep_ptp_gettime_cn10k(struct ptp_clock_info *ptp, struct timespec64 *ts)
+{
+	struct oct_ep_ptp_clock *ep_clk;
+	struct timespec64 tspec;
+	u64 offset_ns = 0;
+	u64 sec, sec1;
+	u64 ns;
+
+	ep_clk = container_of(ptp, struct oct_ep_ptp_clock, caps);
+	preempt_disable_notrace();
+
+	/*
+	 * The CLOCK_SEC and CLOCK_HI represent the PTP time in seconds and
+	 * nanosecond fraction.  When CLOCK_HI reaches 10^9, it rolls over
+	 * to 0, and CLOCK_SEC is incremented.  These two registers are read
+	 * separately, and we need to ensure that we only use values that
+	 * are read in a consistent state.  If there is a second rollover
+	 * event between the two register reads then the two reads do not
+	 * represent the correc time.
+	 * Here we read the CLOCK_SEC register before and after reading the
+	 * CLOCK_HI register, and re-read the nsec counter if a rollover
+	 * just occurred.
+	 */
+	sec = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+			       CN93XX_MIO_PTP_CLOCK_SEC_OFFSET);
+	ns = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+			       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+	sec1 = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+			       CN93XX_MIO_PTP_CLOCK_SEC_OFFSET);
+
+	/* check nsec rollover */
+	if (sec1 > sec) {
+		u64 ns1;
+		/*
+		 * Note: we may want to do something clever here, as phc2sys
+		 * will use the mid-point of the time take to get the time
+		 * as the 'actual' time of the read, but hitting this case
+		 * will cause the read to take longer and for the ns to be
+		 * read at a different point during that time.
+		 * We may be able to use the 2 ns readings to time the
+		 * reads, and then use that to adjust.
+		 * This will likely be hard to test, as this case will
+		 * likely be difficult to hit.
+		 * We may not need to deal with this if we required phc2sys
+		 * to do multiple readings per period, as readings that hit
+		 * this case will be longer than others, so will be ignored
+		 * due to that.
+		 */
+		ns1 = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+			       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+		printk("RFRANZ: ROLLOVER ns: %lld, ns1: %lld\n", (unsigned long long)ns, (unsigned long long)ns1);
+		ns = ns1;
+		sec = sec1;
+	}
+	offset_ns = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+			       CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
+	preempt_enable_notrace();
+
+#ifdef PHC_DEBUG
+	if (prev_offset && prev_offset != offset_ns) {
+	    printk("OCT_PHC: offset changed, prev: 0x%llx, current: 0x%llx\n",
+		   (unsigned long long)prev_offset, (unsigned long long)ns);
+
+	    prev_offset = offset_ns;
+	}
+	if (!prev_offset)
+	    prev_offset = offset_ns;
+#endif
+	tspec = ns_to_timespec64(ns + sec * NSEC_PER_SEC + offset_ns);
+	memcpy(ts, &tspec, sizeof(struct timespec64));
+	return 0;
+}
 static int oct_ep_ptp_enable(struct ptp_clock_info *ptp,
 			  struct ptp_clock_request *rq, int on)
 {
@@ -121,7 +194,7 @@ static int oct_ep_ptp_settime(struct ptp_clock_info *ptp,
 }
 
 
-static const struct ptp_clock_info oct_ep_ptp_caps = {
+static struct ptp_clock_info oct_ep_ptp_caps = {
 	.owner		= THIS_MODULE,
 	.name		= "Octeon EP PHC",
 	.max_adj	= 1,
@@ -130,7 +203,7 @@ static const struct ptp_clock_info oct_ep_ptp_caps = {
 	.pps		= 0,
 	.adjfreq	= oct_ep_ptp_adjfreq,
 	.adjtime	= oct_ep_ptp_adjtime,
-	.gettime64	= oct_ep_ptp_gettime,
+	.gettime64	= oct_ep_ptp_gettime_cn9xxx,
 	.settime64	= oct_ep_ptp_settime,
 	.enable		= oct_ep_ptp_enable,
 };
@@ -206,7 +279,6 @@ static int octeon_pci_os_setup(octeon_device_t *oct_dev)
 int octeon_device_init(octeon_device_t *oct_dev)
 {
 	int ret;
-	octeon_poll_ops_t poll_ops;
 
 	cavium_atomic_set(&oct_dev->status, OCT_DEV_BEGIN_STATE);
 
@@ -248,7 +320,6 @@ static void octeon_device_init_work(struct work_struct *work)
 	octeon_device_t *oct_dev;
 	struct cavium_delayed_wq *wq;
 	u8 status;
-	uint64_t tmp64;
 
 	wq = container_of(work, struct cavium_delayed_wq, wk.work.work);
 	oct_dev = (octeon_device_t *)wq->wk.ctxptr;
@@ -275,6 +346,10 @@ static void octeon_device_init_work(struct work_struct *work)
 	}
 
 	octeon_state = OCT_DRV_ACTIVE;
+
+	if (oct_dev->chip_id == OCTEON_CN10KA_ID_PF) {
+	    oct_ep_ptp_caps.gettime64 = oct_ep_ptp_gettime_cn10k;
+	}
 
 	oct_dev->oct_ep_ptp_clock->caps = oct_ep_ptp_caps;
 	oct_dev->oct_ep_ptp_clock->oct_dev = oct_dev;
@@ -311,7 +386,7 @@ static void octeon_device_poll(struct work_struct *work)
 	octeon_device_t *oct_dev;
 	struct cavium_delayed_wq *wq;
 	u8 status;
-	uint64_t tmp64;
+	uint64_t ptp;
 	uint64_t kt;
 	uint64_t kt1;
 	uint64_t p_kt = 0;
@@ -322,25 +397,68 @@ static void octeon_device_poll(struct work_struct *work)
 
 	cavium_print_msg("OCT_PHC[%d]: Octeon PHC debug poll loop started.\n",
 			 oct_dev->octeon_id);
-	while (1) {
-		schedule_timeout_interruptible(HZ * 1);
-		preempt_disable_notrace();
-		kt1 = ktime_get_real_ns();
-		tmp64 = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
-		tmp64 += octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
-		kt = ktime_get_real_ns();
-		preempt_enable_notrace();
-		printk("OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
-		       oct_dev->octeon_id,
-		       (unsigned long long)tmp64, (long long)(tmp64 - kt),
-		       (long long)(tmp64 - p_ptp),
-		       (long long)(kt - p_kt),
-		       (long long)(tmp64 - p_ptp) - (long long)(kt - p_kt),
-		       (long long)(kt - kt1));
-		p_ptp = tmp64;
-		p_kt = kt;
-		if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
-		    return;
+	if (oct_dev->chip_id == OCTEON_CN10KA_ID_PF) {
+		u64 offset_ns = 0;
+		u64 sec, sec1;
+		u64 ns;
+		while (1) {
+			schedule_timeout_interruptible(HZ * 1);
+			preempt_disable_notrace();
+			kt1 = ktime_get_real_ns();
+			sec = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+					       CN93XX_MIO_PTP_CLOCK_SEC_OFFSET);
+			ns = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+					       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+			sec1 = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+					       CN93XX_MIO_PTP_CLOCK_SEC_OFFSET);
+			offset_ns = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+					       CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
+
+			/* check nsec rollover */
+			if (sec1 > sec) {
+				u64 ns1;
+				ns1 = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+					       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+				printk("RFRANZ: POLL ROLLOVER ns: %lld, ns1: %lld\n", (unsigned long long)ns, (unsigned long long)ns1);
+				ns = ns1;
+				sec = sec1;
+			}
+			ptp = ns + sec * NSEC_PER_SEC + offset_ns;
+			kt = ktime_get_real_ns();
+			preempt_enable_notrace();
+			printk("OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
+			       oct_dev->octeon_id,
+			       (unsigned long long)ptp, (long long)(ptp - kt),
+			       (long long)(ptp - p_ptp),
+			       (long long)(kt - p_kt),
+			       (long long)(ptp - p_ptp) - (long long)(kt - p_kt),
+			       (long long)(kt - kt1));
+			p_ptp = ptp;
+			p_kt = kt;
+			if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
+				return;
+		}
+	} else {
+	    while (1) {
+		    schedule_timeout_interruptible(HZ * 1);
+		    preempt_disable_notrace();
+		    kt1 = ktime_get_real_ns();
+		    ptp = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
+		    ptp += octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+		    kt = ktime_get_real_ns();
+		    preempt_enable_notrace();
+		    printk("OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
+			   oct_dev->octeon_id,
+			   (unsigned long long)ptp, (long long)(ptp - kt),
+			   (long long)(ptp - p_ptp),
+			   (long long)(kt - p_kt),
+			   (long long)(ptp - p_ptp) - (long long)(kt - p_kt),
+			   (long long)(kt - kt1));
+		    p_ptp = ptp;
+		    p_kt = kt;
+		    if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
+			    return;
+	    }
 	}
 }
 #endif
@@ -391,7 +509,7 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 
     oct_idx = oct_dev->octeon_id;
 
-    cavium_print_msg("OCT_PHC[%d]: Stopping octeon device %d\n", oct_idx);
+    cavium_print_msg("OCT_PHC[%d]: Stopping octeon device\n", oct_idx);
     if (cavium_atomic_read(&oct_dev->status) == OCT_DEV_CHECK_FW) {
 	    cavium_atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
 	    while (true) {

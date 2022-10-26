@@ -237,6 +237,20 @@ static int cn93xx_get_pcie_qlmport(octeon_device_t *oct_dev)
 	/* If port is 0xff, PCIe read failed, return error */
 	return(oct_dev->pcie_port == 0xff);
 }
+static int cnxk_get_pcie_qlmport(octeon_device_t * oct)
+{
+	uint64_t sdp_mac;
+
+	sdp_mac = octeon_read_csr64(oct, CNXK_SDP_MAC_NUMBER);
+	oct->pcie_port = sdp_mac & 0xff;
+
+	cavium_print_msg("OCTEON[%d]: CNXK uses PCIE Port %d and PEM %d\n",
+			 oct->octeon_id, oct->pcie_port,
+			 (uint8_t)((sdp_mac >> 16) & 0xff));
+
+	/* If port is 0xff, PCIe read failed, return error */
+	return (oct->pcie_port == 0xff);
+}
 
 static void cn93xx_setup_reg_address(octeon_device_t *oct_dev)
 {
@@ -283,6 +297,50 @@ static void cn93xx_setup_reg_address(octeon_device_t *oct_dev)
 					  CN93XX_SDP_WIN_RD_DATA64);
 }
 
+static void cnxk_setup_reg_address(octeon_device_t * oct)
+{
+	uint8_t cavium_iomem *bar0_pciaddr = oct->mmio[0].hw_addr;
+
+	oct->reg_list.pci_win_wr_addr_hi =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_WR_ADDR_HI);
+	oct->reg_list.pci_win_wr_addr_lo =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_WR_ADDR_LO);
+	oct->reg_list.pci_win_wr_addr =
+	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_WR_ADDR64);
+
+	oct->reg_list.pci_win_rd_addr_hi =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_RD_ADDR_HI);
+	oct->reg_list.pci_win_rd_addr_lo =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_RD_ADDR_LO);
+	oct->reg_list.pci_win_rd_addr =
+	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_RD_ADDR64);
+
+	oct->reg_list.pci_win_wr_data_hi =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_WR_DATA_HI);
+	oct->reg_list.pci_win_wr_data_lo =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_WR_DATA_LO);
+	oct->reg_list.pci_win_wr_data =
+	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_WR_DATA64);
+
+	oct->reg_list.pci_win_rd_data_hi =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_RD_DATA_HI);
+	oct->reg_list.pci_win_rd_data_lo =
+	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_RD_DATA_LO);
+	oct->reg_list.pci_win_rd_data =
+	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+				       CNXK_SDP_WIN_RD_DATA64);
+}
 
 int octeon_map_pci_barx(octeon_device_t *oct_dev, int baridx, int max_map_len)
 {
@@ -335,6 +393,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 	uint32_t dev_id, rev_id;
 	int ret;
 	octeon_cn93xx_pf_t *cn93xx;
+	octeon_cnxk_pf_t *cnxk;
 
 	OCTEON_READ_PCI_CONFIG(oct_dev, 0, &dev_id);
 	OCTEON_READ_PCI_CONFIG(oct_dev, 8, &rev_id);
@@ -427,6 +486,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 		oct_dev->chip_id = OCTEON_CN98XX_ID_PF;
 		return setup_cn98xx_octeon_pf_device(oct_dev); //use 93xx PF setup for now
 
+#endif
 	case OCTEON_CN10KA_PCIID_PF:
 	case OCTEON_CNF10KA_PCIID_PF:
 	case OCTEON_CN10KB_PCIID_PF:
@@ -437,11 +497,38 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 				 PCI_SLOT(oct_dev->pci_dev->devfn),
 				 PCI_FUNC(oct_dev->pci_dev->devfn));
 
+		cnxk = (octeon_cnxk_pf_t *) oct_dev->chip;
+		cnxk->oct = oct_dev;
+
 		oct_dev->pf_num = oct_dev->octeon_id;
-		oct_dev->sriov_info.num_vfs = num_vfs;
+		oct_dev->sriov_info.num_vfs = 0;
 		oct_dev->chip_id = OCTEON_CN10KA_ID_PF;
-		return setup_cnxk_octeon_pf_device(oct_dev);
-#endif
+
+
+		if (octeon_map_pci_barx(oct_dev, 0, 0))
+			return -1;
+
+		if (octeon_map_pci_barx(oct_dev, 1, MAX_BAR1_IOREMAP_SIZE)) {
+			cavium_error("%s CNXK BAR1 map failed\n", __FUNCTION__);
+			octeon_unmap_pci_barx(oct_dev, 0);
+			return -1;
+		}
+
+		if (octeon_map_pci_barx(oct_dev, 2, MAX_BAR1_IOREMAP_SIZE)) {
+			cavium_error("%s CNXK BAR4 map failed\n", __FUNCTION__);
+			octeon_unmap_pci_barx(oct_dev, 0);
+			octeon_unmap_pci_barx(oct_dev, 1);
+			return -1;
+		}
+		cnxk_setup_reg_address(oct_dev);
+
+		/* Update pcie port number in the device structure */
+		ret = cnxk_get_pcie_qlmport(oct_dev);
+		if (ret != 0)
+			goto free_barx;
+
+
+		return 0;
 	default:
 		cavium_error("OCT_PHC: Unknown device found (subsystem_id: %x)\n",
 			     dev_id);
@@ -463,7 +550,7 @@ uint64_t octeon_pci_bar4_read64(octeon_device_t *oct_dev, int baridx, uint64_t b
 {
 	if (baridx * OCTEON_BAR_4_MAPPING_SIZE + bar_offset + 8
 	    > oct_dev->mmio[2].mapped_len) {
-	    cavium_error("OCT_PHC[%d]: Invalid BAR4 index %d offset: 0x%llx, mapped len: 0x%x",
+	    cavium_error("OCT_PHC[%d]: Invalid BAR4 index %d offset: 0x%llx, mapped len: 0x%lx",
 			 oct_dev->octeon_id, baridx, (unsigned long long)bar_offset, oct_dev->mmio[2].mapped_len);
 	    return 0;
 	}
