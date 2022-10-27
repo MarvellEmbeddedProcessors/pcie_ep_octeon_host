@@ -15,9 +15,13 @@
 #define OCTEP_VF_DRV_NAME	"octeon_ep_vf"
 #define OCTEP_VF_DRV_STRING	"Marvell Octeon EndPoint NIC VF Driver"
 
-#define  OCTEP_PCI_DEVICE_ID_CN93_VF   0xB203    //93xx VF
-#define  OCTEP_PCI_DEVICE_ID_CNF95O_VF 0xB603    //95O VF
-#define  OCTEP_PCI_DEVICE_ID_CNF95N_VF 0xB403    //95N VF
+#define  OCTEP_PCI_DEVICE_ID_CN93_VF    0xB203
+#define  OCTEP_PCI_DEVICE_ID_CNF95O_VF  0xB603
+#define  OCTEP_PCI_DEVICE_ID_CNF95N_VF  0xB403
+#define  OCTEP_PCI_DEVICE_ID_CN10KA_VF  0xB903
+#define  OCTEP_PCI_DEVICE_ID_CNF10KA_VF 0xBA03
+#define  OCTEP_PCI_DEVICE_ID_CNF10KB_VF 0xBC03
+#define  OCTEP_PCI_DEVICE_ID_CN10KB_VF  0xBD03
 
 #define  OCTEP_VF_MAX_QUEUES   63
 #define  OCTEP_VF_MAX_IQ       OCTEP_VF_MAX_QUEUES
@@ -297,6 +301,7 @@ int octep_vf_setup_oqs(struct octep_vf_device *oct);
 void octep_vf_free_oqs(struct octep_vf_device *oct);
 void octep_vf_oq_dbell_init(struct octep_vf_device *oct);
 void octep_vf_device_setup_cn93(struct octep_vf_device *oct);
+void octep_vf_device_setup_cnxk(struct octep_vf_device *oct);
 int octep_vf_iq_process_completions(struct octep_vf_iq *iq, u16 budget);
 int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget);
 void octep_vf_set_ethtool_ops(struct net_device *netdev);

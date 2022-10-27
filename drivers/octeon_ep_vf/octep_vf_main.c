@@ -25,6 +25,10 @@ static const struct pci_device_id octep_vf_pci_id_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN93_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF95O_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF95N_VF)},
+	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN10KA_VF)},
+	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF10KA_VF)},
+	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF10KB_VF)},
+	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN10KB_VF)},
 	{0, },
 };
 MODULE_DEVICE_TABLE(pci, octep_vf_pci_id_tbl);
@@ -883,6 +887,14 @@ static const char *octep_vf_devid_to_str(struct octep_vf_device *oct)
 		return "CNF95O";
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
 		return "CNF95N";
+	case OCTEP_PCI_DEVICE_ID_CN10KA_VF:
+		return "CN10KA";
+	case OCTEP_PCI_DEVICE_ID_CNF10KA_VF:
+		return "CNF10KA";
+	case OCTEP_PCI_DEVICE_ID_CNF10KB_VF:
+		return "CNF10KB";
+	case OCTEP_PCI_DEVICE_ID_CN10KB_VF:
+		return "CN10KB";
 	default:
 		return "Unsupported";
 	}
@@ -917,10 +929,19 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 	case OCTEP_PCI_DEVICE_ID_CN93_VF:
 	case OCTEP_PCI_DEVICE_ID_CNF95O_VF:
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
-		dev_info(&pdev->dev, "Setting up OCTEON %s PF PASS%d.%d\n",
+		dev_info(&pdev->dev, "Setting up OCTEON %s VF PASS%d.%d\n",
 			 octep_vf_devid_to_str(oct), OCTEP_VF_MAJOR_REV(oct),
 			 OCTEP_VF_MINOR_REV(oct));
 		octep_vf_device_setup_cn93(oct);
+		break;
+	case OCTEP_PCI_DEVICE_ID_CNF10KA_VF:
+	case OCTEP_PCI_DEVICE_ID_CN10KA_VF:
+	case OCTEP_PCI_DEVICE_ID_CNF10KB_VF:
+	case OCTEP_PCI_DEVICE_ID_CN10KB_VF:
+		dev_info(&pdev->dev, "Setting up OCTEON %s VF PASS%d.%d\n",
+			 octep_vf_devid_to_str(oct), OCTEP_VF_MAJOR_REV(oct),
+			 OCTEP_VF_MINOR_REV(oct));
+		octep_vf_device_setup_cnxk(oct);
 		break;
 	default:
 		dev_err(&pdev->dev, "Unsupported device\n");

@@ -143,11 +143,7 @@ int octep_setup_pfvf_mbox(struct octep_device *oct)
 		memset(oct->mbox[ring], 0, sizeof(struct octep_mbox));
 		mutex_init(&oct->mbox[ring]->lock);
 		INIT_WORK(&oct->mbox[ring]->wk.work, octep_pfvf_mbox_work);
-		oct->mbox[ring]->wk.ctxptr = oct->mbox[i];
-
-		if (!oct->mbox[i])
-			oct->mbox[ring]->wk.ctxptr = oct->mbox[ring];
-
+		oct->mbox[ring]->wk.ctxptr = oct->mbox[ring];
 		oct->mbox[ring]->oct = oct;
 		oct->mbox[ring]->vf_id = i;
 		oct->hw_ops.setup_mbox_regs(oct, ring);

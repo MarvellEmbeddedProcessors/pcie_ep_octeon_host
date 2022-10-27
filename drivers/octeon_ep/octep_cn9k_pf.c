@@ -391,9 +391,11 @@ static int octep_poll_non_ioq_interrupts_cn93_pf(struct octep_device *oct)
 	reg0 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(0));
 	reg1 = octep_read_csr64(oct, CN93_SDP_EPF_MBOX_RINT(1));
 	if (reg0 || reg1) {
-		dev_info(&oct->pdev->dev,
-			 "Received MBOX_RINT intr: reg0 0x%llx reg1 0x%llx\n",
-			 reg0, reg1);
+
+		/*
+		 * dev_info(&oct->pdev->dev, "Received MBOX_RINT intr: reg0 0x%llx reg1 0x%llx\n",
+		 * reg0, reg1);
+		 */
 
 		active_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
 		active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
@@ -418,9 +420,11 @@ static int octep_poll_non_ioq_interrupts_cn93_pf(struct octep_device *oct)
 	/* Check for OEI INTR */
 	reg0 = octep_read_csr64(oct, CN93_SDP_EPF_OEI_RINT);
 	if (reg0) {
-		dev_info(&oct->pdev->dev,
-			 "Received OEI_RINT intr: 0x%llx\n",
-			 reg0);
+
+		/*
+		 * dev_info(&oct->pdev->dev, "Received OEI_RINT intr: 0x%llx\n",
+		 * reg0);
+		 */
 		octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT, reg0);
 		if (reg0 & CN93_SDP_EPF_OEI_RINT_DATA_BIT_MBOX)
 			queue_work(octep_wq, &oct->ctrl_mbox_task);
@@ -626,6 +630,8 @@ static void octep_disable_interrupts_cn93_pf(struct octep_device *oct)
 	octep_write_csr64(oct, CN93_SDP_EPF_OEI_RINT_ENA_W1C, -1ULL);
 	octep_write_csr64(oct, CN93_SDP_EPF_MISC_RINT_ENA_W1C, intr_mask);
 	octep_write_csr64(oct, CN93_SDP_EPF_DMA_RINT_ENA_W1C, intr_mask);
+	octep_write_csr64(oct, CN93_SDP_EPF_MBOX_RINT_ENA_W1C(0), -1ULL);
+	octep_write_csr64(oct, CN93_SDP_EPF_MBOX_RINT_ENA_W1C(1), -1ULL);
 }
 
 /* Get new Octeon Read Index: index of descriptor that Octeon reads next. */

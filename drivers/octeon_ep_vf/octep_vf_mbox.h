@@ -66,7 +66,7 @@ enum octep_pfvf_link_autoneg {
 	OCTEP_PFVF_LINK_FIXED,
 };
 
-#define OCTEP_PFVF_MBOX_TIMEOUT_MS     500
+#define OCTEP_PFVF_MBOX_TIMEOUT_MS     800
 #define OCTEP_PFVF_MBOX_MAX_RETRIES    2
 #define OCTEP_PFVF_MBOX_VERSION        0
 #define OCTEP_PFVF_MBOX_MAX_DATA_SIZE  6
