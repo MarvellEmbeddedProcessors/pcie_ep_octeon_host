@@ -146,7 +146,6 @@ static void octep_vf_init_config_cn93_vf(struct octep_vf_device *oct)
 
 	conf->iq.num_descs = OCTEP_VF_IQ_MAX_DESCRIPTORS;
 	conf->iq.instr_type = OCTEP_VF_64BYTE_INSTR;
-	/* VSR: FIXME: get pkind from PF using mailbox command */
 	conf->iq.pkind = 0;
 	conf->iq.db_min = OCTEP_VF_DB_MIN;
 	conf->iq.intr_threshold = OCTEP_VF_IQ_INTR_THRESHOLD;
@@ -193,10 +192,6 @@ static void octep_vf_setup_iq_regs_cn93(struct octep_vf_device *oct, int iq_no)
 	/* Store the current instruction counter (used in flush_iq calculation) */
 	reset_instr_cnt = readl(iq->inst_cnt_reg);
 	writel(reset_instr_cnt, iq->inst_cnt_reg);
-
-	/* TODO: remove after testing */
-	dev_info(&oct->pdev->dev, "VF: InstQ[%d]:dbell reg @ 0x%p instcnt_reg @ 0x%p\n",
-		 iq_no, iq->doorbell_reg, iq->inst_cnt_reg);
 
 	/* INTR_THRESHOLD is set to max(FFFFFFFF) to disable the INTR */
 	reg_val = CFG_GET_IQ_INTR_THRESHOLD(oct->conf) & 0xffffffff;
@@ -473,10 +468,7 @@ void octep_vf_device_setup_cn93(struct octep_vf_device *oct)
 	oct->hw_ops.setup_oq_regs = octep_vf_setup_oq_regs_cn93;
 	oct->hw_ops.setup_mbox_regs = octep_vf_setup_mbox_regs_cn93;
 
-	/* FIXME: remove the commented line; not required for VF driver */
-	//oct->hw_ops.non_ioq_intr_handler = octep_vf_non_ioq_intr_handler_cn93;
 	oct->hw_ops.ioq_intr_handler = octep_vf_ioq_intr_handler_cn93;
-	//oct->hw_ops.mbox_intr_handler = octep_vf_mbox_intr_handler_cn93;
 	oct->hw_ops.reinit_regs = octep_vf_reinit_regs_cn93;
 
 	oct->hw_ops.enable_interrupts = octep_vf_enable_interrupts_cn93;

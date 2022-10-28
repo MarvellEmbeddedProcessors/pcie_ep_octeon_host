@@ -192,8 +192,6 @@ static int octep_vf_request_irqs(struct octep_vf_device *oct)
 	/* Request IRQs for Tx/Rx queues */
 	for (i = 0; i < oct->num_oqs; i++) {
 		ioq_vector = oct->ioq_vector[i];
-		//msix_entry = &oct->msix_entries[i + num_non_ioq_msix];
-		/* VSR: FIXME: do we include mbox interrupts in msix_entries ? */
 		msix_entry = &oct->msix_entries[i];
 
 		snprintf(ioq_vector->name, sizeof(ioq_vector->name),
@@ -410,10 +408,6 @@ static void octep_vf_link_up(struct net_device *netdev)
 	netif_tx_start_all_queues(netdev);
 }
 
-/* FIXME: send a mailbox command to PF
- * ?? is the VF not always up ? we do not need this right ??
- * may be required in NIC mode when connected to a CGX/RPM VF
- */
 static void octep_vf_set_rx_state(struct octep_vf_device *oct, bool up)
 {
 	int err = 0;

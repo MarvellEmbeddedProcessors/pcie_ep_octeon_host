@@ -22,7 +22,6 @@
 #define  OCTEP_VF_MAX_QUEUES   63
 #define  OCTEP_VF_MAX_IQ       OCTEP_VF_MAX_QUEUES
 #define  OCTEP_VF_MAX_OQ       OCTEP_VF_MAX_QUEUES
-#define  OCTEP_MAX_VF       64 //VSR:FIXME: delete it
 
 #define OCTEP_VF_MAX_MSIX_VECTORS OCTEP_VF_MAX_OQ
 

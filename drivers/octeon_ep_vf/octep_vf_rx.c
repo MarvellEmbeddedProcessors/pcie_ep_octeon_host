@@ -374,7 +374,6 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 
 		/* Swap the length field that is in Big-Endian to CPU */
 		buff_info->len = be64_to_cpu(resp_hw->length);
-		/* FIXME: VSR: get supported offload capabilities from PF ? */
 		if (oct->caps_enabled & OCTEP_VF_CAP_RX_CHECKSUM) {
 			/* Extended response header is immediately after
 			 * response header (resp_hw)
@@ -447,7 +446,6 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 
 		skb->dev = oq->netdev;
 		skb->protocol =  eth_type_trans(skb, skb->dev);
-		/* FIXME: VSR: get supported offload capabilities from PF ? */
 		if (resp_hw_ext &&
 		    resp_hw_ext->csum_verified == OCTEP_VF_CSUM_VERIFIED)
 			skb->ip_summed = CHECKSUM_UNNECESSARY;

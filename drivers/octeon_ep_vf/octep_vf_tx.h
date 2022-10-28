@@ -57,7 +57,6 @@ struct octep_vf_iface_tx_stats {
 	/* Packets sent to the multicast DMAC */
 	u64 mcst;
 
-	/* FIXME: review with team */
 	/* Packets dropped */
 	u64 dropped;
 
