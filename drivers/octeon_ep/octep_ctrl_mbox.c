@@ -131,19 +131,19 @@ static int write_mbox_data(struct octep_ctrl_mbox_q *q, uint32_t *pi,
 	qbuf = (q->hw_q + *pi);
 	if (*pi < ci) {
 		/* copy entire w_sz */
-		memcpy(qbuf, buf, w_sz);
+		memcpy_toio(qbuf, buf, w_sz);
 		*pi = octep_ctrl_mbox_circq_inc(*pi, w_sz, q->sz);
 	} else {
 		/* copy upto end of queue */
 		cp_sz = min((q->sz - *pi), w_sz);
-		memcpy(qbuf, buf, cp_sz);
+		memcpy_toio(qbuf, buf, cp_sz);
 		w_sz -= cp_sz;
 		*pi = octep_ctrl_mbox_circq_inc(*pi, cp_sz, q->sz);
 		if (w_sz) {
 			/* roll over and copy remaining w_sz */
 			buf += cp_sz;
 			qbuf = (q->hw_q + *pi);
-			memcpy(qbuf, buf, w_sz);
+			memcpy_toio(qbuf, buf, w_sz);
 			*pi = octep_ctrl_mbox_circq_inc(*pi, w_sz, q->sz);
 		}
 	}
@@ -213,19 +213,19 @@ static int read_mbox_data(struct octep_ctrl_mbox_q *q, uint32_t pi,
 	qbuf = (q->hw_q + *ci);
 	if (*ci < pi) {
 		/* copy entire r_sz */
-		memcpy(buf, qbuf, r_sz);
+		memcpy_fromio(buf, qbuf, r_sz);
 		*ci = octep_ctrl_mbox_circq_inc(*ci, r_sz, q->sz);
 	} else {
 		/* copy upto end of queue */
 		cp_sz = min((q->sz - *ci), r_sz);
-		memcpy(buf, qbuf, cp_sz);
+		memcpy_fromio(buf, qbuf, cp_sz);
 		r_sz -= cp_sz;
 		*ci = octep_ctrl_mbox_circq_inc(*ci, cp_sz, q->sz);
 		if (r_sz) {
 			/* roll over and copy remaining r_sz */
 			buf += cp_sz;
 			qbuf = (q->hw_q + *ci);
-			memcpy(buf, qbuf, r_sz);
+			memcpy_fromio(buf, qbuf, r_sz);
 			*ci = octep_ctrl_mbox_circq_inc(*ci, r_sz, q->sz);
 		}
 	}
