@@ -14,14 +14,14 @@
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
 
-static const uint32_t req_hdr_sz = sizeof(union octep_ctrl_net_req_hdr);
-static const uint32_t mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
-static const uint32_t mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
-static const uint32_t state_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_state);
-static const uint32_t link_info_sz = sizeof(struct octep_ctrl_net_link_info);
+static const u32 req_hdr_sz = sizeof(union octep_ctrl_net_req_hdr);
+static const u32 mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
+static const u32 mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
+static const u32 state_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_state);
+static const u32 link_info_sz = sizeof(struct octep_ctrl_net_link_info);
 
 static void init_send_req(struct octep_ctrl_mbox_msg *msg, void *buf,
-			  uint16_t sz, int vfid)
+			  u16 sz, int vfid)
 {
 	msg->hdr.s.flags = OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ;
 	msg->hdr.s.sz = req_hdr_sz + sz;
@@ -307,7 +307,7 @@ static int process_mbox_notify(struct octep_device *oct,
 
 int octep_ctrl_net_recv_fw_messages(struct octep_device *oct)
 {
-	static uint16_t msg_sz = sizeof(union octep_ctrl_net_max_data);
+	static u16 msg_sz = sizeof(union octep_ctrl_net_max_data);
 	union octep_ctrl_net_max_data data = {0};
 	struct octep_ctrl_mbox_msg msg = {0};
 	int ret;

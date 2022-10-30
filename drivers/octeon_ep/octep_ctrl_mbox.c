@@ -52,7 +52,7 @@
 #define OCTEP_CTRL_MBOX_F2HQ_CONS(m)	((OCTEP_CTRL_MBOX_F2HQ_INFO(m)) + 4)
 #define OCTEP_CTRL_MBOX_F2HQ_SZ(m)	((OCTEP_CTRL_MBOX_F2HQ_INFO(m)) + 8)
 
-static const uint32_t mbox_hdr_sz = sizeof(union octep_ctrl_mbox_msg_hdr);
+static const u32 mbox_hdr_sz = sizeof(union octep_ctrl_mbox_msg_hdr);
 
 static inline u32 octep_ctrl_mbox_circq_inc(u32 index, u32 inc, u32 sz)
 {
@@ -121,8 +121,8 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 	return 0;
 }
 
-static int write_mbox_data(struct octep_ctrl_mbox_q *q, uint32_t *pi,
-			   uint32_t ci, void *buf, uint32_t w_sz)
+static int write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi,
+			   u32 ci, void *buf, u32 w_sz)
 {
 	u32 cp_sz;
 	u8 __iomem *qbuf;
@@ -203,8 +203,8 @@ int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox,
 	return (m) ? m : -EAGAIN;
 }
 
-static int read_mbox_data(struct octep_ctrl_mbox_q *q, uint32_t pi,
-			  uint32_t *ci, void *buf, uint32_t r_sz)
+static int read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi,
+			  u32 *ci, void *buf, u32 r_sz)
 {
 	u32 cp_sz;
 	u8 __iomem *qbuf;
