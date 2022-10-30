@@ -22,8 +22,8 @@
 #include "octep_ctrl_net.h"
 
 static void octep_pfvf_validate_version(struct octep_device *oct,  u32 vf_id,
-				    union octep_pfvf_mbox_word cmd,
-				    union octep_pfvf_mbox_word *rsp)
+					union octep_pfvf_mbox_word cmd,
+					union octep_pfvf_mbox_word *rsp)
 {
 	u32 vf_version = (u32)cmd.s_version.version;
 
@@ -34,8 +34,8 @@ static void octep_pfvf_validate_version(struct octep_device *oct,  u32 vf_id,
 }
 
 static void octep_pfvf_get_link_status(struct octep_device *oct, u32 vf_id,
-				      union octep_pfvf_mbox_word cmd,
-				      union octep_pfvf_mbox_word *rsp)
+				       union octep_pfvf_mbox_word cmd,
+				       union octep_pfvf_mbox_word *rsp)
 {
 	int status;
 
@@ -50,8 +50,8 @@ static void octep_pfvf_get_link_status(struct octep_device *oct, u32 vf_id,
 }
 
 static void octep_pfvf_set_link_status(struct octep_device *oct, u32 vf_id,
-				      union octep_pfvf_mbox_word cmd,
-				      union octep_pfvf_mbox_word *rsp)
+				       union octep_pfvf_mbox_word cmd,
+				       union octep_pfvf_mbox_word *rsp)
 {
 	int err;
 
@@ -65,8 +65,8 @@ static void octep_pfvf_set_link_status(struct octep_device *oct, u32 vf_id,
 }
 
 static void octep_pfvf_set_rx_state(struct octep_device *oct, u32 vf_id,
-				      union octep_pfvf_mbox_word cmd,
-				      union octep_pfvf_mbox_word *rsp)
+				    union octep_pfvf_mbox_word cmd,
+				    union octep_pfvf_mbox_word *rsp)
 {
 	int err;
 
@@ -133,10 +133,11 @@ int octep_setup_pfvf_mbox(struct octep_device *oct)
 	rings_per_vf = oct->conf->sriov_cfg.max_rings_per_vf;
 
 	for (i = 0; i < num_vfs; i++) {
+		/* TODO: FIXME: VSR: discuss about the usage of i and ring variables */
 		ring  = rings_per_vf * i;
-		oct->mbox[ring] = vmalloc(sizeof(struct octep_mbox));
+		oct->mbox[ring] = vzalloc(sizeof(*oct->mbox[ring]));
 
-		if (oct->mbox[ring] == NULL)
+		if (!oct->mbox[ring])
 			goto free_mbox;
 
 		memset(oct->mbox[ring], 0, sizeof(struct octep_mbox));
@@ -144,7 +145,7 @@ int octep_setup_pfvf_mbox(struct octep_device *oct)
 		INIT_WORK(&oct->mbox[ring]->wk.work, octep_pfvf_mbox_work);
 		oct->mbox[ring]->wk.ctxptr = oct->mbox[i];
 
-		if (oct->mbox[i] == NULL)
+		if (!oct->mbox[i])
 			oct->mbox[ring]->wk.ctxptr = oct->mbox[ring];
 
 		oct->mbox[ring]->oct = oct;
@@ -296,8 +297,7 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 		octep_pfvf_pf_get_data(oct, mbox, vf_id, cmd, &rsp);
 		break;
 	default:
-		dev_err(&oct->pdev->dev, "OCTEP_PFVF_MBOX_TYPE_RSP_NACK opcode:%d\n",
-					  cmd.s.opcode);
+		dev_err(&oct->pdev->dev, "PF-VF mailbox: invalid opcode %d\n", cmd.s.opcode);
 		rsp.s.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
 		break;
 	}

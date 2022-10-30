@@ -7,7 +7,6 @@
 #ifndef _OCTEP_PFVF_MBOX_H_
 #define _OCTEP_PFVF_MBOX_H_
 
-
 #define OCTEP_PF_MBOX_VERSION 1
 
 enum octep_pfvf_mbox_opcode {

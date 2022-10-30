@@ -15,7 +15,7 @@
 
 /* We will support 128 pf's in control mbox */
 #define CTRL_MBOX_MAX_PF	128
-#define CTRL_MBOX_SZ		(size_t)(0x400000 / CTRL_MBOX_MAX_PF)
+#define CTRL_MBOX_SZ		((size_t)(0x400000 / CTRL_MBOX_MAX_PF))
 
 #define FW_HB_INTERVAL_IN_SECS		1
 #define FW_HB_MISS_COUNT		10
@@ -782,14 +782,4 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 
 	octep_init_config_cn93_pf(oct);
 	octep_configure_ring_mapping_cn93_pf(oct);
-}
-
-void octep_device_setup_cnf95o_pf(struct octep_device *oct)
-{
-	octep_device_setup_cn93_pf(oct);
-}
-
-void octep_device_setup_cnf95n_pf(struct octep_device *oct)
-{
-	octep_device_setup_cn93_pf(oct);
 }

@@ -1099,8 +1099,6 @@ static void octep_device_cleanup(struct octep_device *oct)
 	oct->conf = NULL;
 }
 
-#define FW_STATUS_VSEC_ID	0xA3
-#define FW_STATUS_READY 	1
 static u8 get_fw_ready_status(struct octep_device *oct)
 {
 	u32 pos = 0;
@@ -1110,6 +1108,7 @@ static u8 get_fw_ready_status(struct octep_device *oct)
 	while ((pos = pci_find_next_ext_capability(oct->pdev, pos,
 						   PCI_EXT_CAP_ID_VNDR))) {
 		pci_read_config_word(oct->pdev, pos + 4, &vsec_id);
+#define FW_STATUS_VSEC_ID  0xA3
 		if (vsec_id == FW_STATUS_VSEC_ID) {
 			pci_read_config_byte(oct->pdev, (pos + 8), &status);
 			dev_info(&oct->pdev->dev, "Firmware ready %u\n",
@@ -1140,6 +1139,7 @@ static void octep_dev_setup_task(struct work_struct *work)
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_WAIT_FOR_FW);
 	while (true) {
 		status = get_fw_ready_status(oct);
+#define FW_STATUS_READY    1
 		if (status == FW_STATUS_READY)
 			break;
 
@@ -1190,8 +1190,6 @@ static void octep_dev_setup_task(struct work_struct *work)
 	}
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_READY);
 	dev_info(&oct->pdev->dev, "Device setup successful\n");
-
-	return;
 }
 
 /**
@@ -1299,7 +1297,7 @@ free_resources:
 	pci_disable_device(pdev);
 }
 
-int octep_sriov_disable(struct octep_device *oct)
+static int octep_sriov_disable(struct octep_device *oct)
 {
 	struct pci_dev *pdev = oct->pdev;
 
@@ -1314,7 +1312,7 @@ int octep_sriov_disable(struct octep_device *oct)
 	return 0;
 }
 
-int octep_sriov_enable(struct octep_device *oct, int num_vfs)
+static int octep_sriov_enable(struct octep_device *oct, int num_vfs)
 {
 	struct pci_dev *pdev = oct->pdev;
 	int err;
@@ -1329,7 +1327,7 @@ int octep_sriov_enable(struct octep_device *oct, int num_vfs)
 	return num_vfs;
 }
 
-int octep_sriov_configure(struct pci_dev *pdev, int num_vfs)
+static int octep_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
 	struct octep_device *oct = pci_get_drvdata(pdev);
 	int max_nvfs;
