@@ -160,7 +160,6 @@ static void octep_vf_init_config_cn93_vf(struct octep_vf_device *oct)
 }
 
 /* Setup registers for a hardware Tx Queue  */
-/* TODO: create octep_vf_device or struct octep_vf_device_vf */
 static void octep_vf_setup_iq_regs_cn93(struct octep_vf_device *oct, int iq_no)
 {
 	struct octep_vf_iq *iq = oct->iq[iq_no];
