@@ -159,6 +159,7 @@ static void __exit phc_exit(void)
 
 #define FW_STATUS_VSEC_ID 0xA3
 #define FW_STATUS_READY 1
+#define FW_STATUS_RUNNING 2
 static u8 oct_get_fw_ready_status(octeon_device_t *oct_dev)
 {
 	u32 pos = 0;
@@ -255,7 +256,7 @@ static void octeon_device_init_work(struct work_struct *work)
 	cavium_atomic_set(&oct_dev->status, OCT_DEV_CHECK_FW);
 	while (true) {
 		status = oct_get_fw_ready_status(oct_dev);
-		if (status == FW_STATUS_READY)
+		if (status == FW_STATUS_READY || status == FW_STATUS_RUNNING)
 			break;
 
 		schedule_timeout_interruptible(HZ * 1);
