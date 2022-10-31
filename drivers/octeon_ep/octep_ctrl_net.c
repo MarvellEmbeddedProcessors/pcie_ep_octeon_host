@@ -19,11 +19,14 @@ static const u32 mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
 static const u32 mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
 static const u32 state_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_state);
 static const u32 link_info_sz = sizeof(struct octep_ctrl_net_link_info);
+static atomic_t ctrl_net_msg_id;
 
 static void init_send_req(struct octep_ctrl_mbox_msg *msg, void *buf,
 			  u16 sz, int vfid)
 {
 	msg->hdr.s.flags = OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ;
+	msg->hdr.s.msg_id = atomic_inc_return(&ctrl_net_msg_id) &
+			    GENMASK(sizeof(msg->hdr.s.msg_id) * BITS_PER_BYTE, 0);
 	msg->hdr.s.sz = req_hdr_sz + sz;
 	msg->sg_num = 1;
 	msg->sg_list[0].msg = buf;
