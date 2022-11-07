@@ -17,7 +17,7 @@
 #define     CN93_VF_CONFIG_PCIE_SLOTCAP         0x84
 #define     CN93_VF_CONFIG_PCIE_SLOTCTL         0x88
 
-#define     CN93_VF_RING_OFFSET                    (0x1ULL << 17)
+#define     CN93_VF_RING_OFFSET                    BIT_ULL(17)
 
 /*###################### RING IN REGISTERS #########################*/
 #define    CN93_VF_SDP_R_IN_CONTROL_START          0x10000
@@ -66,15 +66,15 @@
 /* Number of instructions to be read in one MAC read request.
  * setting to Max value(4)
  **/
-#define    CN93_VF_R_IN_CTL_IDLE                  (0x1ULL << 28)
+#define    CN93_VF_R_IN_CTL_IDLE                  BIT_ULL(28)
 #define    CN93_VF_R_IN_CTL_RDSIZE                (0x3ULL << 25)
-#define    CN93_VF_R_IN_CTL_IS_64B                (0x1ULL << 24)
-#define    CN93_VF_R_IN_CTL_D_NSR                 (0x1ULL << 8)
-#define    CN93_VF_R_IN_CTL_D_ESR                 (0x1ULL << 6)
-#define    CN93_VF_R_IN_CTL_D_ROR                 (0x1ULL << 5)
-#define    CN93_VF_R_IN_CTL_NSR                   (0x1ULL << 3)
-#define    CN93_VF_R_IN_CTL_ESR                   (0x1ULL << 1)
-#define    CN93_VF_R_IN_CTL_ROR                   (0x1ULL << 0)
+#define    CN93_VF_R_IN_CTL_IS_64B                BIT_ULL(24)
+#define    CN93_VF_R_IN_CTL_D_NSR                 BIT_ULL(8)
+#define    CN93_VF_R_IN_CTL_D_ESR                 BIT_ULL(6)
+#define    CN93_VF_R_IN_CTL_D_ROR                 BIT_ULL(5)
+#define    CN93_VF_R_IN_CTL_NSR                   BIT_ULL(3)
+#define    CN93_VF_R_IN_CTL_ESR                   BIT_ULL(1)
+#define    CN93_VF_R_IN_CTL_ROR                   BIT_ULL(0)
 
 #define    CN93_VF_R_IN_CTL_MASK     (CN93_VF_R_IN_CTL_RDSIZE | CN93_VF_R_IN_CTL_IS_64B)
 
@@ -117,20 +117,20 @@
 	(CN93_VF_SDP_R_OUT_BYTE_CNT_START + ((ring) * CN93_VF_RING_OFFSET))
 
 /*------------------ R_OUT Masks ----------------*/
-#define    CN93_VF_R_OUT_INT_LEVELS_BMODE            (1ULL << 63)
+#define    CN93_VF_R_OUT_INT_LEVELS_BMODE            BIT_ULL(63)
 #define    CN93_VF_R_OUT_INT_LEVELS_TIMET            (32)
 
-#define    CN93_VF_R_OUT_CTL_IDLE                    (1ULL << 40)
-#define    CN93_VF_R_OUT_CTL_ES_I                    (1ULL << 34)
-#define    CN93_VF_R_OUT_CTL_NSR_I                   (1ULL << 33)
-#define    CN93_VF_R_OUT_CTL_ROR_I                   (1ULL << 32)
-#define    CN93_VF_R_OUT_CTL_ES_D                    (1ULL << 30)
-#define    CN93_VF_R_OUT_CTL_NSR_D                   (1ULL << 29)
-#define    CN93_VF_R_OUT_CTL_ROR_D                   (1ULL << 28)
-#define    CN93_VF_R_OUT_CTL_ES_P                    (1ULL << 26)
-#define    CN93_VF_R_OUT_CTL_NSR_P                   (1ULL << 25)
-#define    CN93_VF_R_OUT_CTL_ROR_P                   (1ULL << 24)
-#define    CN93_VF_R_OUT_CTL_IMODE                   (1ULL << 23)
+#define    CN93_VF_R_OUT_CTL_IDLE                    BIT_ULL(40)
+#define    CN93_VF_R_OUT_CTL_ES_I                    BIT_ULL(34)
+#define    CN93_VF_R_OUT_CTL_NSR_I                   BIT_ULL(33)
+#define    CN93_VF_R_OUT_CTL_ROR_I                   BIT_ULL(32)
+#define    CN93_VF_R_OUT_CTL_ES_D                    BIT_ULL(30)
+#define    CN93_VF_R_OUT_CTL_NSR_D                   BIT_ULL(29)
+#define    CN93_VF_R_OUT_CTL_ROR_D                   BIT_ULL(28)
+#define    CN93_VF_R_OUT_CTL_ES_P                    BIT_ULL(26)
+#define    CN93_VF_R_OUT_CTL_NSR_P                   BIT_ULL(25)
+#define    CN93_VF_R_OUT_CTL_ROR_P                   BIT_ULL(24)
+#define    CN93_VF_R_OUT_CTL_IMODE                   BIT_ULL(23)
 
 /* ##################### Mail Box Registers ########################## */
 /* SDP PF to VF Mailbox Data Register */
@@ -140,8 +140,8 @@
 /* SDP VF to PF Mailbox Data Register */
 #define    CN93_VF_SDP_R_MBOX_VF_PF_DATA_START    0x10230
 
-#define    CN93_VF_SDP_R_MBOX_PF_VF_INT_ENAB         (1ULL << 1)
-#define    CN93_VF_SDP_R_MBOX_PF_VF_INT_STATUS       (1ULL << 0)
+#define    CN93_VF_SDP_R_MBOX_PF_VF_INT_ENAB         BIT_ULL(1)
+#define    CN93_VF_SDP_R_MBOX_PF_VF_INT_STATUS       BIT_ULL(0)
 
 #define    CN93_VF_SDP_R_MBOX_PF_VF_DATA(ring)          \
 	(CN93_VF_SDP_R_MBOX_PF_VF_DATA_START + ((ring) * CN93_VF_RING_OFFSET))

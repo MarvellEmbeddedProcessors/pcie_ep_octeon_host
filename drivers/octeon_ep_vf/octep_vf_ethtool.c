@@ -54,7 +54,7 @@ static const char octep_vf_gstrings_rx_q_stats[][ETH_GSTRING_LEN] = {
 #define OCTEP_VF_RX_Q_STATS_CNT (sizeof(octep_vf_gstrings_rx_q_stats) / ETH_GSTRING_LEN)
 
 static void octep_vf_get_drvinfo(struct net_device *netdev,
-			      struct ethtool_drvinfo *info)
+				 struct ethtool_drvinfo *info)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 
@@ -63,7 +63,7 @@ static void octep_vf_get_drvinfo(struct net_device *netdev,
 }
 
 static void octep_vf_get_strings(struct net_device *netdev,
-			      u32 stringset, u8 *data)
+				 u32 stringset, u8 *data)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	u16 num_queues = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
@@ -114,9 +114,8 @@ static int octep_vf_get_sset_count(struct net_device *netdev, int sset)
 	}
 }
 
-static void
-octep_vf_get_ethtool_stats(struct net_device *netdev,
-			struct ethtool_stats *stats, u64 *data)
+static void octep_vf_get_ethtool_stats(struct net_device *netdev,
+				       struct ethtool_stats *stats, u64 *data)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	struct octep_vf_iface_tx_stats *iface_tx_stats;
@@ -248,7 +247,7 @@ octep_vf_get_ethtool_stats(struct net_device *netdev,
 }
 
 static int octep_vf_get_link_ksettings(struct net_device *netdev,
-				    struct ethtool_link_ksettings *cmd)
+				       struct ethtool_link_ksettings *cmd)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	struct octep_vf_iface_link_info *link_info;

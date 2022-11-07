@@ -400,7 +400,7 @@ static void octep_vf_enable_oq_cn93(struct octep_vf_device *oct, int oq_no)
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(oq_no), reg_val);
 }
 
-/* Enable all hardware Tx/Rx Queues assined to VF */
+/* Enable all hardware Tx/Rx Queues assigned to VF */
 static void octep_vf_enable_io_queues_cn93(struct octep_vf_device *oct)
 {
 	u8 q;
@@ -411,7 +411,7 @@ static void octep_vf_enable_io_queues_cn93(struct octep_vf_device *oct)
 	}
 }
 
-/* Disable a hardware Tx Queue assined to VF */
+/* Disable a hardware Tx Queue assigned to VF */
 static void octep_vf_disable_iq_cn93(struct octep_vf_device *oct, int iq_no)
 {
 	u64 reg_val = 0ULL;
@@ -421,7 +421,7 @@ static void octep_vf_disable_iq_cn93(struct octep_vf_device *oct, int iq_no)
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_IN_ENABLE(iq_no), reg_val);
 }
 
-/* Disable a hardware Rx Queue assined to VF */
+/* Disable a hardware Rx Queue assigned to VF */
 static void octep_vf_disable_oq_cn93(struct octep_vf_device *oct, int oq_no)
 {
 	u64 reg_val = 0ULL;
@@ -431,7 +431,7 @@ static void octep_vf_disable_oq_cn93(struct octep_vf_device *oct, int oq_no)
 	octep_vf_write_csr64(oct, CN93_VF_SDP_R_OUT_ENABLE(oq_no), reg_val);
 }
 
-/* Disable all hardware Tx/Rx Queues assined to VF */
+/* Disable all hardware Tx/Rx Queues assigned to VF */
 static void octep_vf_disable_io_queues_cn93(struct octep_vf_device *oct)
 {
 	int q = 0;

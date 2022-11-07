@@ -48,8 +48,8 @@ MODULE_LICENSE("GPL");
  */
 static int octep_vf_alloc_ioq_vectors(struct octep_vf_device *oct)
 {
-	int i;
 	struct octep_vf_ioq_vector *ioq_vector;
+	int i;
 
 	for (i = 0; i < oct->num_oqs; i++) {
 		oct->ioq_vector[i] = vzalloc(sizeof(*oct->ioq_vector[i]));
@@ -347,7 +347,7 @@ static void octep_vf_napi_add(struct octep_vf_device *oct)
 
 	for (i = 0; i < oct->num_oqs; i++) {
 		netdev_dbg(oct->netdev, "Adding NAPI on Q-%d\n", i);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,1,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_vf_napi_poll, 64);
 #else
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_vf_napi_poll);
@@ -410,7 +410,7 @@ static void octep_vf_link_up(struct net_device *netdev)
 
 static void octep_vf_set_rx_state(struct octep_vf_device *oct, bool up)
 {
-	int err = 0;
+	int err;
 
 	err = octep_vf_mbox_set_rx_state(oct, up);
 	if (err)
@@ -419,7 +419,7 @@ static void octep_vf_set_rx_state(struct octep_vf_device *oct, bool up)
 
 static int octep_vf_get_link_status(struct octep_vf_device *oct)
 {
-	int err = 0;
+	int err;
 
 	err = octep_vf_mbox_get_link_status(oct, &oct->link_info.oper_up);
 	if (err)
@@ -429,7 +429,7 @@ static int octep_vf_get_link_status(struct octep_vf_device *oct)
 
 static void octep_vf_set_link_status(struct octep_vf_device *oct, bool up)
 {
-	int err = 0;
+	int err;
 
 	err = octep_vf_mbox_set_link_status(oct, up);
 	if (err) {
@@ -558,7 +558,7 @@ static int octep_vf_stop(struct net_device *netdev)
  * Return: 0, if the Tx queue is not full.
  *         1, if the Tx queue is full.
  */
-static inline int octep_vf_iq_full_check(struct octep_vf_iq *iq)
+static int octep_vf_iq_full_check(struct octep_vf_iq *iq)
 {
 	if (likely((iq->max_count - atomic_read(&iq->instr_pending)) >=
 		   OCTEP_VF_WAKE_QUEUE_THRESHOLD))
@@ -590,7 +590,7 @@ static inline int octep_vf_iq_full_check(struct octep_vf_iq *iq)
  *         NETDEV_TX_OK, if successfully enqueued to hardware Tx queue.
  */
 static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
-				    struct net_device *netdev)
+				       struct net_device *netdev)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	struct octep_vf_tx_sglist_desc *sglist;
@@ -717,8 +717,8 @@ dma_map_err:
 
 int octep_vf_get_if_stats(struct octep_vf_device *oct)
 {
-	int ret = 0, size = 0;
 	struct octep_vf_iface_rxtx_stats vf_stats;
+	int ret, size;
 
 	memset(&vf_stats, 0, sizeof(struct octep_vf_iface_rxtx_stats));
 	ret = octep_vf_mbox_bulk_read(oct, OCTEP_PFVF_MBOX_CMD_GET_STATS,
@@ -752,7 +752,7 @@ int octep_vf_get_link_info(struct octep_vf_device *oct)
  * @stats: pointer to stats structure to be filled in.
  */
 static void octep_vf_get_stats64(struct net_device *netdev,
-			      struct rtnl_link_stats64 *stats)
+				 struct rtnl_link_stats64 *stats)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	u64 tx_packets, tx_bytes, rx_packets, rx_bytes;
@@ -850,7 +850,7 @@ static int octep_vf_change_mtu(struct net_device *netdev, int new_mtu)
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
 	struct octep_vf_iface_link_info *link_info;
-	int err = 0;
+	int err;
 
 	link_info = &oct->link_info;
 	if (link_info->mtu == new_mtu)
@@ -923,8 +923,7 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 		octep_vf_device_setup_cn93(oct);
 		break;
 	default:
-		dev_err(&pdev->dev,
-			"%s: unsupported device\n", __func__);
+		dev_err(&pdev->dev, "Unsupported device\n");
 		goto unsupported_dev;
 	}
 
@@ -935,7 +934,7 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 unsupported_dev:
 	iounmap(oct->mmio.hw_addr);
 	kfree(oct->conf);
-	return -ENOTSUPP;
+	return -EOPNOTSUPP;
 }
 
 /**
@@ -972,7 +971,7 @@ int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
  */
 static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
-	struct octep_vf_device *octep_vf_dev = NULL;
+	struct octep_vf_device *octep_vf_dev;
 	struct net_device *netdev;
 	int err;
 
@@ -1109,7 +1108,7 @@ static struct pci_driver octep_vf_driver = {
 };
 
 /**
- * octep_vf_init_module() - Module initialiation.
+ * octep_vf_init_module() - Module initialization.
  *
  * create common resource for the driver and register PCI driver.
  */

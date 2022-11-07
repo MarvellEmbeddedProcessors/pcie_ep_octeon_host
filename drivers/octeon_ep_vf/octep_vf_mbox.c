@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /* Marvell Octeon EP (EndPoint) VF Ethernet Driver
  *
  * Copyright (C) 2020 Marvell.
@@ -14,11 +14,10 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 {
 	int ring = 0;
 
-	oct->mbox = vmalloc(sizeof(struct octep_vf_mbox));
+	oct->mbox = vzalloc(sizeof(*oct->mbox));
 	if (!oct->mbox)
 		return -1;
 
-	memset(oct->mbox, 0, sizeof(struct octep_vf_mbox));
 	spin_lock_init(&oct->mbox->lock);
 
 	oct->hw_ops.setup_mbox_regs(oct, ring);
@@ -27,7 +26,6 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 
 	dev_info(&oct->pdev->dev, "setup vf mbox successfully\n");
 	return 0;
-
 }
 
 void octep_vf_delete_mbox(struct octep_vf_device *oct)
@@ -54,8 +52,9 @@ int octep_vf_mbox_version_check(struct octep_vf_device *oct)
 	if (!ret)
 		return 0;
 	if (ret == OCTEP_PFVF_MBOX_CMD_STATUS_NACK) {
-		dev_err(&oct->pdev->dev, "VF Mbox version:%x is not compatible with PF\n",
-					  (u32)cmd.s_version.version);
+		dev_err(&oct->pdev->dev,
+			"VF Mbox version:%llu is not compatible with PF\n",
+			(u64)cmd.s_version.version);
 		dev_err(&oct->pdev->dev, "Upgrade driver to compatibale version\n");
 	}
 	return ret;
@@ -64,9 +63,9 @@ int octep_vf_mbox_version_check(struct octep_vf_device *oct)
 void octep_vf_mbox_work(struct work_struct *work)
 {
 	struct octep_vf_mbox_wk *wk = container_of(work, struct octep_vf_mbox_wk, work);
-	struct octep_vf_mbox *mbox = NULL;
-	struct octep_vf_device *oct = NULL;
 	struct octep_vf_iface_link_info *link_info;
+	struct octep_vf_device *oct = NULL;
+	struct octep_vf_mbox *mbox = NULL;
 	u64 pf_vf_data;
 
 	oct = (struct octep_vf_device *)wk->ctxptr;
@@ -90,8 +89,8 @@ inline void octep_vf_mbox_set_state(struct octep_vf_mbox *mbox, enum octep_pfvf_
 
 enum octep_pfvf_mbox_state octep_vf_mbox_get_state(struct octep_vf_mbox *mbox)
 {
-	unsigned long flags;
 	enum octep_pfvf_mbox_state state;
+	unsigned long flags;
 
 	spin_lock_irqsave(&mbox->lock, flags);
 	state = mbox->state;
@@ -99,13 +98,14 @@ enum octep_pfvf_mbox_state octep_vf_mbox_get_state(struct octep_vf_mbox *mbox)
 	return state;
 }
 
-static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_word cmd,
-				  union octep_pfvf_mbox_word *rsp)
+static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
+				    union octep_pfvf_mbox_word cmd,
+				    union octep_pfvf_mbox_word *rsp)
 {
-	volatile uint64_t reg_val = 0ull;
-	int count = 0;
 	long timeout = OCTEP_PFVF_MBOX_WRITE_WAIT_TIME;
 	struct octep_vf_mbox *mbox = oct->mbox;
+	u64 reg_val = 0ull;
+	int count = 0;
 
 	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
@@ -122,12 +122,11 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfv
 		count++;
 	}
 	if (count == OCTEP_PFVF_MBOX_TIMEOUT_MS) {
-		dev_err(&oct->pdev->dev, "%s Timeout count:%d\n",
-					 __func__, count);
+		dev_err(&oct->pdev->dev, "mbox send command timed out\n");
 		return OCTEP_PFVF_MBOX_CMD_STATUS_TIMEDOUT;
 	}
 	if (rsp->s.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
-		dev_err(&oct->pdev->dev, "%s Received Mbox NACK from PF\n", __func__);
+		dev_err(&oct->pdev->dev, "mbox_send: Received NACK\n");
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NACK;
 	}
 	rsp->u64 = reg_val;
@@ -137,15 +136,14 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfv
 int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_word cmd,
 			   union octep_pfvf_mbox_word *rsp)
 {
-	int ret;
 	struct octep_vf_mbox *mbox = oct->mbox;
+	int ret;
 
 	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
-	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY) {
-		dev_err(&oct->pdev->dev, "%s VF Mbox is in Busy state\n", __func__);
+	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
-	}
+
 	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_BUSY);
 	ret = __octep_vf_mbox_send_cmd(oct, cmd, rsp);
 	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
@@ -155,19 +153,18 @@ int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_wo
 int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_opcode opcode,
 			    u8 *data, int *size)
 {
+	struct octep_vf_mbox *mbox = oct->mbox;
 	union octep_pfvf_mbox_word cmd;
 	union octep_pfvf_mbox_word rsp;
-	int read_cnt, i = 0, ret;
 	int data_len = 0, tmp_len = 0;
-	struct octep_vf_mbox *mbox = oct->mbox;
+	int read_cnt, i = 0, ret;
 
 	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
 
-	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY) {
-		dev_err(&oct->pdev->dev, "%s VF Mbox is in Busy state\n", __func__);
+	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
-	}
+
 	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_BUSY);
 	cmd.u64 = 0;
 	cmd.s_data.opcode = opcode;
@@ -175,7 +172,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	/* Send cmd to read data from PF */
 	ret = __octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 	if (ret) {
-		dev_err(&oct->pdev->dev, "%s send mbox cmd fail for data request\n", __func__);
+		dev_err(&oct->pdev->dev, "send mbox cmd fail for data request\n");
 		octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
 		return ret;
 	}
@@ -191,8 +188,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	while (data_len) {
 		ret = __octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 		if (ret) {
-			dev_err(&oct->pdev->dev, "%s send mbox cmd fail for data request\n",
-						  __func__);
+			dev_err(&oct->pdev->dev, "send mbox cmd fail for data request\n");
 			octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
 			mbox->mbox_data.data_index = 0;
 			memset(mbox->mbox_data.recv_data, 0, OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE);
@@ -231,8 +227,9 @@ int octep_vf_mbox_set_mtu(struct octep_vf_device *oct, int mtu)
 	int ret = 0;
 
 	if (mtu < ETH_MIN_MTU || frame_size > ETH_MAX_MTU) {
-		dev_err(&oct->pdev->dev, "%s MTU:%d MIN MTU:%d MAX MTU:%d\n",
-			__func__, mtu, ETH_MIN_MTU, ETH_MAX_MTU);
+		dev_err(&oct->pdev->dev,
+			"Failed to set MTU to %d MIN MTU:%d MAX MTU:%d\n",
+			mtu, ETH_MIN_MTU, ETH_MAX_MTU);
 		return -EINVAL;
 	}
 
@@ -242,13 +239,11 @@ int octep_vf_mbox_set_mtu(struct octep_vf_device *oct, int mtu)
 
 	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 	if (ret) {
-		dev_err(&oct->pdev->dev, "%s Mbox send fail ret value:%d\n",
-			__func__, ret);
+		dev_err(&oct->pdev->dev, "Mbox send failed; err=%d\n", ret);
 		return ret;
 	}
 	if (rsp.s_set_mtu.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
-		dev_err(&oct->pdev->dev, "%s Received Mbox NACK from PF for MTU:%d\n",
-			__func__, mtu);
+		dev_err(&oct->pdev->dev, "Received Mbox NACK from PF for MTU:%d\n", mtu);
 		return -EINVAL;
 	}
 
@@ -267,12 +262,11 @@ int octep_vf_mbox_set_mac_addr(struct octep_vf_device *oct, char *mac_addr)
 		cmd.s_set_mac.mac_addr[i] = mac_addr[i];
 	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 	if (ret) {
-		dev_err(&oct->pdev->dev, "%s Mbox send fail ret value:%d\n",
-			__func__, ret);
+		dev_err(&oct->pdev->dev, "Mbox send failed; err = %d\n", ret);
 		return ret;
 	}
 	if (rsp.s_set_mac.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
-		dev_err(&oct->pdev->dev, "%s received NACK\n", __func__);
+		dev_err(&oct->pdev->dev, "received NACK\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -288,12 +282,11 @@ int octep_vf_mbox_get_mac_addr(struct octep_vf_device *oct, char *mac_addr)
 	cmd.s_set_mac.opcode = OCTEP_PFVF_MBOX_CMD_GET_MAC_ADDR;
 	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 	if (ret) {
-		dev_err(&oct->pdev->dev, "%s Mbox send fail ret value:%d\n",
-			__func__, ret);
+		dev_err(&oct->pdev->dev, "get_mac: mbox send failed; err = %d\n", ret);
 		return ret;
 	}
 	if (rsp.s_set_mac.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
-		dev_err(&oct->pdev->dev, "%s received NACK\n", __func__);
+		dev_err(&oct->pdev->dev, "get_mac: received NACK\n");
 		return -EINVAL;
 	}
 	for (i = 0; i < ETH_ALEN; i++)

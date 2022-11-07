@@ -316,7 +316,7 @@ void octep_vf_free_oqs(struct octep_vf_device *oct)
  * Return: packets received after previous check.
  */
 static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
-				      struct octep_vf_oq *oq)
+					 struct octep_vf_oq *oq)
 {
 	u32 pkt_count, new_pkts;
 
@@ -352,7 +352,7 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
  * Return: number of packets processed and pushed to stack.
  */
 static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
-				 struct octep_vf_oq *oq, u16 pkts_to_process)
+				    struct octep_vf_oq *oq, u16 pkts_to_process)
 {
 	struct octep_vf_oq_resp_hw_ext *resp_hw_ext = NULL;
 	struct octep_vf_rx_buffer *buff_info;
@@ -491,7 +491,7 @@ int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget)
 			break;
 
 		pkts_processed = __octep_vf_oq_process_rx(oct, oq,
-						       pkts_available);
+							  pkts_available);
 		oq->pkts_pending -= pkts_processed;
 		total_pkts_processed += pkts_processed;
 	}

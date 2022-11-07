@@ -164,7 +164,7 @@ struct octep_vf_iface_link_info {
 	/* MTU */
 	u16 mtu;
 
-	/* Autonegotation state. */
+	/* Autonegotiation state. */
 #define OCTEP_VF_LINK_MODE_AUTONEG_SUPPORTED   BIT(0)
 #define OCTEP_VF_LINK_MODE_AUTONEG_ADVERTISED  BIT(1)
 	u8 autoneg;
