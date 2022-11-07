@@ -601,7 +601,7 @@ static int octep_stop(struct net_device *netdev)
  * Return: 0, if the Tx queue is not full.
  *         1, if the Tx queue is full.
  */
-static inline int octep_iq_full_check(struct octep_iq *iq)
+static int octep_iq_full_check(struct octep_iq *iq)
 {
 	if (likely((iq->max_count - atomic_read(&iq->instr_pending)) >=
 		   OCTEP_WAKE_QUEUE_THRESHOLD))

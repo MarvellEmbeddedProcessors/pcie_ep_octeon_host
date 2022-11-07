@@ -54,17 +54,17 @@
 
 static const u32 mbox_hdr_sz = sizeof(union octep_ctrl_mbox_msg_hdr);
 
-static inline u32 octep_ctrl_mbox_circq_inc(u32 index, u32 inc, u32 sz)
+static u32 octep_ctrl_mbox_circq_inc(u32 index, u32 inc, u32 sz)
 {
 	return (index + inc) % sz;
 }
 
-static inline u32 octep_ctrl_mbox_circq_space(u32 pi, u32 ci, u32 sz)
+static u32 octep_ctrl_mbox_circq_space(u32 pi, u32 ci, u32 sz)
 {
 	return sz - (abs(pi - ci) % sz);
 }
 
-static inline u32 octep_ctrl_mbox_circq_depth(u32 pi, u32 ci, u32 sz)
+static u32 octep_ctrl_mbox_circq_depth(u32 pi, u32 ci, u32 sz)
 {
 	return (abs(pi - ci) % sz);
 }
