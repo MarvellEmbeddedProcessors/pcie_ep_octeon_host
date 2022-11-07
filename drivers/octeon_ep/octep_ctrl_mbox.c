@@ -20,7 +20,7 @@
 #include "octep_main.h"
 
 /* Timeout in msecs for message response */
-#define OCTEP_CTRL_MBOX_MSG_TIMEOUT_MS			1500
+#define OCTEP_CTRL_MBOX_MSG_TIMEOUT_MS			100
 /* Time in msecs to wait for message response */
 #define OCTEP_CTRL_MBOX_MSG_WAIT_MS			10
 
