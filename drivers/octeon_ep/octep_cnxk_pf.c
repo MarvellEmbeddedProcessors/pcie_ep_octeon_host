@@ -222,7 +222,7 @@ static void octep_configure_ring_mapping_cnxk_pf(struct octep_device *oct)
 	}
 }
 
-/* Initialize configuration limits and initial active config 93xx PF. */
+/* Initialize configuration limits and initial active config */
 static void octep_init_config_cnxk_pf(struct octep_device *oct)
 {
 	struct octep_config *conf = oct->conf;
@@ -571,7 +571,7 @@ static irqreturn_t octep_ioq_intr_handler_cnxk_pf(void *data)
 	return IRQ_HANDLED;
 }
 
-/* soft reset of 93xx */
+/* soft reset */
 static int octep_soft_reset_cnxk_pf(struct octep_device *oct)
 {
 	dev_info(&oct->pdev->dev, "CNXKXX: Doing soft reset\n");
