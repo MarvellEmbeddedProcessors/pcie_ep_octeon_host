@@ -119,7 +119,6 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 			rsp->u64 = reg_val;
 			break;
 		}
-		count++;
 	}
 	if (count == OCTEP_PFVF_MBOX_TIMEOUT_MS) {
 		dev_err(&oct->pdev->dev, "mbox send command timed out\n");
