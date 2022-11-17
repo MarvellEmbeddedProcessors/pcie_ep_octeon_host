@@ -23,6 +23,9 @@
 #include "cavium_release.h"
 #include "octeon_hw.h"
 
+
+static void octeon_device_poll(struct work_struct *work);
+
 int startup_set_ptp = 0;
 module_param(startup_set_ptp, int, 0);
 MODULE_PARM_DESC(startup_set_ptp, "Flag to set PTP clock to host clock at startup for testing");
@@ -80,13 +83,14 @@ static int oct_ep_ptp_gettime_cn9xxx(struct ptp_clock_info *ptp, struct timespec
 			       CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
 #ifdef PHC_DEBUG
 	if (prev_offset && prev_offset != ns) {
-	    printk("OCT_PHC: offset changed, prev: 0x%llx, current: 0x%llx\n",
-		   (unsigned long long)prev_offset, (unsigned long long)ns);
+		printk("OCT_PHC[%d]: offset changed, prev: 0x%llx, current: 0x%llx\n",
+		       ep_clk->oct_dev->octeon_id, (unsigned long long)prev_offset,
+		       (unsigned long long)ns);
 
-	    prev_offset = ns;
+		prev_offset = ns;
 	}
 	if (!prev_offset)
-	    prev_offset = ns;
+		prev_offset = ns;
 #endif
 
 	ns += octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
@@ -149,7 +153,10 @@ static int oct_ep_ptp_gettime_cn10k(struct ptp_clock_info *ptp, struct timespec6
 		 */
 		ns1 = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
 			       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
-		printk("RFRANZ: ROLLOVER ns: %lld, ns1: %lld\n", (unsigned long long)ns, (unsigned long long)ns1);
+		printk("OCT_PHC[%d]: POLL ROLLOVER ns: %lld, ns1: %lld\n",
+		       ep_clk->oct_dev->octeon_id,
+		       (unsigned long long)ns,
+		       (unsigned long long)ns1);
 		ns = ns1;
 		sec = sec1;
 	}
@@ -159,13 +166,14 @@ static int oct_ep_ptp_gettime_cn10k(struct ptp_clock_info *ptp, struct timespec6
 
 #ifdef PHC_DEBUG
 	if (prev_offset && prev_offset != offset_ns) {
-	    printk("OCT_PHC: offset changed, prev: 0x%llx, current: 0x%llx\n",
-		   (unsigned long long)prev_offset, (unsigned long long)ns);
+		printk("OCT_PHC[%d]: offset changed, prev: 0x%llx, current: 0x%llx\n",
+		       ep_clk->oct_dev->octeon_id, (unsigned long long)prev_offset,
+		       (unsigned long long)ns);
 
-	    prev_offset = offset_ns;
+		prev_offset = offset_ns;
 	}
 	if (!prev_offset)
-	    prev_offset = offset_ns;
+		prev_offset = offset_ns;
 #endif
 	tspec = ns_to_timespec64(ns + sec * NSEC_PER_SEC + offset_ns);
 	memcpy(ts, &tspec, sizeof(struct timespec64));
@@ -211,15 +219,11 @@ static struct ptp_clock_info oct_ep_ptp_caps = {
 static int __init phc_init(void)
 {
 	int ret;
-	printk("phc_init\n");
-
-
 	ret = pci_register_driver(&octeon_ep_phc_pci_driver);
 	if (ret < 0) {
-		cavium_error("OCT_PHC: pci_module_init() returned %d\n", ret);
-		cavium_error
-		    ("OCT_PHC: Your kernel may not be configured for hotplug\n");
-		cavium_error("        and no Octeon devices were detected\n");
+		printk(KERN_ERR "OCT_PHC: pci_register_driver() returned %d\n", ret);
+		printk(KERN_ERR "OCT_PHC: Your kernel may not be configured for hotplug\n");
+		printk(KERN_ERR "        and no Octeon devices were detected\n");
 		return ret;
 	}
 	return 0;
@@ -244,7 +248,7 @@ static u8 oct_get_fw_ready_status(octeon_device_t *oct_dev)
 		pci_read_config_word(oct_dev->pci_dev, pos + 4, &vsec_id);
 		if (vsec_id == FW_STATUS_VSEC_ID) {
 			pci_read_config_byte(oct_dev->pci_dev, (pos + 8), &status);
-			cavium_print_msg("OCT_PHC[%d]:fw ready status %u\n",
+			dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]:fw ready status %u\n",
 					 oct_dev->octeon_id, status);
 			return status;
 		}
@@ -258,14 +262,14 @@ static int octeon_pci_os_setup(octeon_device_t *oct_dev)
 
 	/* setup PCI stuff first */
 	if (pci_enable_device(oct_dev->pci_dev)) {
-		cavium_error("OCT_PHC[%d]: pci_enable_device failed\n",
+		dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: pci_enable_device failed\n",
 			     oct_dev->octeon_id);
 		return 1;
 	}
 
 	/* Octeon device supports DMA into a 64-bit space */
 	if (dma_set_mask_and_coherent(&oct_dev->pci_dev->dev, DMA_BIT_MASK(64))) {
-		cavium_error("OCT_PHC[%d]: Unexpected DMA device capability\n",
+		dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Unexpected DMA device capability\n",
 			     oct_dev->octeon_id);
 		return 1;
 	}
@@ -290,12 +294,12 @@ int octeon_device_init(octeon_device_t *oct_dev)
 	ret  = octeon_chip_specific_setup(oct_dev);
 	/* Identify the Octeon type and map the BAR address space. */
 	if (ret == -1) {
-		cavium_error("OCT_PHC[%d]: Chip specific setup failed\n",
+		dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Chip specific setup failed\n",
 			 oct_dev->octeon_id);
 		return 1;
 	}
 
-	cavium_print_msg(" Chip specific setup completed\n");
+	dev_info(&oct_dev->pci_dev->dev, "Chip specific setup completed\n");
 	cavium_atomic_set(&oct_dev->status, OCT_DEV_PCI_MAP_DONE);
 
 	cavium_spin_lock_init(&oct_dev->oct_lock);
@@ -333,21 +337,21 @@ static void octeon_device_init_work(struct work_struct *work)
 		schedule_timeout_interruptible(HZ * 1);
 		if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING) {
 			cavium_atomic_set(&oct_dev->status, OCT_DEV_STATE_INVALID);
-			cavium_print_msg("OCT_PHC[%d]: Stopping firmware ready work.\n",
+			dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Stopping firmware ready work.\n",
 					 oct_dev->octeon_id);
 			return;
 		}
 	}
 
 	if (octeon_device_init(oct_dev)) {
-		cavium_print_msg("OCT_PHC[%d]: ERROR: Octeon driver failed to load.\n",
+		dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: ERROR: Octeon driver failed to load.\n",
 				 oct_dev->octeon_id);
 		return;
 	}
 
 	octeon_state = OCT_DRV_ACTIVE;
 
-	if (oct_dev->chip_id == OCTEON_CN10KA_ID_PF) {
+	if (OCTEON_CNXK_PF(oct_dev->chip_id) || OCTEON_CNFXK_PF(oct_dev->chip_id)) {
 	    oct_ep_ptp_caps.gettime64 = oct_ep_ptp_gettime_cn10k;
 	}
 
@@ -356,7 +360,7 @@ static void octeon_device_init_work(struct work_struct *work)
 
 	oct_dev->oct_ep_ptp_clock->ptp_clock = ptp_clock_register(&oct_dev->oct_ep_ptp_clock->caps, NULL);
 	if (!oct_dev->oct_ep_ptp_clock->ptp_clock) {
-	    cavium_print_msg("OCT_PHC[%d]: ERROR: Octeon PHC driver failed to load.\n",
+	    dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: ERROR: Octeon PHC driver failed to load.\n",
 			     oct_dev->octeon_id);
 	    return;
 	}
@@ -370,22 +374,38 @@ static void octeon_device_init_work(struct work_struct *work)
 	     * be allowed in the EBF menu.
 	     */
 	    uint64_t kt = ktime_get_real_ns();
-	    octeon_pci_bar4_write64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET, kt);
-	    printk("OCT_PHC[%d]: Setting PTP_CLOCK_HI based on host time: %lld\n",
-		   oct_dev->octeon_id, (unsigned long long)kt);
+	    if (OCTEON_CNXK_PF(oct_dev->chip_id) || OCTEON_CNFXK_PF(oct_dev->chip_id)) {
+		    octeon_pci_bar4_write64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET, kt%1000000000);
+		    octeon_pci_bar4_write64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_SEC_OFFSET, kt/1000000000);
+	    } else {
+		octeon_pci_bar4_write64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET, kt);
+	    }
+	    dev_info(&oct_dev->pci_dev->dev,
+		     "OCT_PHC[%d]: Setting PTP_CLOCK_HI based on host time: %lld\n",
+		     oct_dev->octeon_id, (unsigned long long)kt);
 	}
 
-	cavium_print_msg("OCT_PHC[%d]: Octeon PHC is ready\n",
-			 oct_dev->octeon_id);
+	dev_info(&oct_dev->pci_dev->dev,
+		 "OCT_PHC[%d]: Octeon PHC using PCI device %02x:%02x:%x, PTP device ptp%d is ready\n",
+		 oct_dev->octeon_id,
+		 oct_dev->pci_dev->bus->number,
+		 PCI_SLOT(oct_dev->pci_dev->devfn),
+		 PCI_FUNC(oct_dev->pci_dev->devfn),
+		 ptp_clock_index(oct_dev->oct_ep_ptp_clock->ptp_clock));
+#ifdef PHC_DEBUG
+	oct_dev->dev_poll_wq.wq = alloc_workqueue("dev_poll_wq", WQ_MEM_RECLAIM, 0);
+	oct_dev->dev_poll_wq.wk.ctxptr = oct_dev;
+	INIT_DELAYED_WORK(&oct_dev->dev_poll_wq.wk.work, octeon_device_poll);
+	queue_delayed_work(oct_dev->dev_poll_wq.wq, &oct_dev->dev_poll_wq.wk.work, 0);
+#endif
+
 }
 
 #ifdef PHC_DEBUG
-static int poll_flag = 1;
 static void octeon_device_poll(struct work_struct *work)
 {
 	octeon_device_t *oct_dev;
 	struct cavium_delayed_wq *wq;
-	u8 status;
 	uint64_t ptp;
 	uint64_t kt;
 	uint64_t kt1;
@@ -395,12 +415,13 @@ static void octeon_device_poll(struct work_struct *work)
 	wq = container_of(work, struct cavium_delayed_wq, wk.work.work);
 	oct_dev = (octeon_device_t *)wq->wk.ctxptr;
 
-	cavium_print_msg("OCT_PHC[%d]: Octeon PHC debug poll loop started.\n",
-			 oct_dev->octeon_id);
-	if (oct_dev->chip_id == OCTEON_CN10KA_ID_PF) {
+	if (OCTEON_CNXK_PF(oct_dev->chip_id) || OCTEON_CNFXK_PF(oct_dev->chip_id)) {
 		u64 offset_ns = 0;
 		u64 sec, sec1;
 		u64 ns;
+		dev_info(&oct_dev->pci_dev->dev,
+			 "OCT_PHC[%d]: Octeon CN10K PHC debug poll loop started, chip ID: 0x%x\n",
+			 oct_dev->octeon_id, oct_dev->chip_id);
 		while (1) {
 			schedule_timeout_interruptible(HZ * 1);
 			preempt_disable_notrace();
@@ -419,46 +440,54 @@ static void octeon_device_poll(struct work_struct *work)
 				u64 ns1;
 				ns1 = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
 					       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
-				printk("RFRANZ: POLL ROLLOVER ns: %lld, ns1: %lld\n", (unsigned long long)ns, (unsigned long long)ns1);
+				dev_info(&oct_dev->pci_dev->dev,
+					 "OCT_PHC[%d]: POLL ROLLOVER ns: %lld, ns1: %lld\n",
+					 oct_dev->octeon_id,
+					 (unsigned long long)ns,
+					 (unsigned long long)ns1);
 				ns = ns1;
 				sec = sec1;
 			}
 			ptp = ns + sec * NSEC_PER_SEC + offset_ns;
 			kt = ktime_get_real_ns();
 			preempt_enable_notrace();
-			printk("OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
-			       oct_dev->octeon_id,
-			       (unsigned long long)ptp, (long long)(ptp - kt),
-			       (long long)(ptp - p_ptp),
-			       (long long)(kt - p_kt),
-			       (long long)(ptp - p_ptp) - (long long)(kt - p_kt),
-			       (long long)(kt - kt1));
+			dev_info(&oct_dev->pci_dev->dev,
+				 "OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
+				 oct_dev->octeon_id,
+				 (unsigned long long)ptp, (long long)(ptp - kt),
+				 (long long)(ptp - p_ptp),
+				 (long long)(kt - p_kt),
+				 (long long)(ptp - p_ptp) - (long long)(kt - p_kt),
+				 (long long)(kt - kt1));
 			p_ptp = ptp;
 			p_kt = kt;
 			if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
 				return;
 		}
 	} else {
-	    while (1) {
-		    schedule_timeout_interruptible(HZ * 1);
-		    preempt_disable_notrace();
-		    kt1 = ktime_get_real_ns();
-		    ptp = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
-		    ptp += octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
-		    kt = ktime_get_real_ns();
-		    preempt_enable_notrace();
-		    printk("OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
-			   oct_dev->octeon_id,
-			   (unsigned long long)ptp, (long long)(ptp - kt),
-			   (long long)(ptp - p_ptp),
-			   (long long)(kt - p_kt),
-			   (long long)(ptp - p_ptp) - (long long)(kt - p_kt),
-			   (long long)(kt - kt1));
-		    p_ptp = ptp;
-		    p_kt = kt;
-		    if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
-			    return;
-	    }
+		dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon CN9XXX PHC debug poll loop started, chip ID: 0x%x\n",
+				 oct_dev->octeon_id, oct_dev->chip_id);
+		while (1) {
+			schedule_timeout_interruptible(HZ * 1);
+			preempt_disable_notrace();
+			kt1 = ktime_get_real_ns();
+			ptp = octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CKOUT_THRESH_HI_OFFSET);
+			ptp += octeon_pci_bar4_read64(oct_dev, CN93XX_MIO_PTP_BAR4_REGION, CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+			kt = ktime_get_real_ns();
+			preempt_enable_notrace();
+			dev_info(&oct_dev->pci_dev->dev,
+				 "OCT_PHC[%d]: PTP_CLOCK_HI: %lld, kt/ptp diff: %lld, ptp int: %lld, kt int: %lld, int diff: %lld, lat: %lld\n",
+				 oct_dev->octeon_id,
+				 (unsigned long long)ptp, (long long)(ptp - kt),
+				 (long long)(ptp - p_ptp),
+				 (long long)(kt - p_kt),
+				 (long long)(ptp - p_ptp) - (long long)(kt - p_kt),
+				 (long long)(kt - kt1));
+			p_ptp = ptp;
+			p_kt = kt;
+			if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
+				return;
+		}
 	}
 }
 #endif
@@ -466,7 +495,6 @@ static void octeon_device_poll(struct work_struct *work)
 int octeon_ep_phc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
     octeon_device_t *oct_dev = NULL;
-    u32 dev_id;
 
     oct_dev = octeon_allocate_device(pdev->device);
     if (oct_dev == NULL)
@@ -483,21 +511,10 @@ int octeon_ep_phc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
     /* set linux specific device pointer */
     oct_dev->pci_dev = (void *)pdev;
 
-    OCTEON_READ_PCI_CONFIG(oct_dev, 0x2c, &dev_id);
-    cavium_print_msg("OCT_PHC[%d]: Setting up PHC %x\n",
-		     oct_dev->octeon_id, dev_id);
-
     oct_dev->dev_init_wq.wq = alloc_workqueue("dev_init_wq", WQ_MEM_RECLAIM, 0);
     oct_dev->dev_init_wq.wk.ctxptr = oct_dev;
     INIT_DELAYED_WORK(&oct_dev->dev_init_wq.wk.work, octeon_device_init_work);
     queue_delayed_work(oct_dev->dev_init_wq.wq, &oct_dev->dev_init_wq.wk.work, 0);
-
-#ifdef PHC_DEBUG
-    oct_dev->dev_poll_wq.wq = alloc_workqueue("dev_poll_wq", WQ_MEM_RECLAIM, 0);
-    oct_dev->dev_poll_wq.wk.ctxptr = oct_dev;
-    INIT_DELAYED_WORK(&oct_dev->dev_poll_wq.wk.work, octeon_device_poll);
-    queue_delayed_work(oct_dev->dev_poll_wq.wq, &oct_dev->dev_poll_wq.wk.work, 0);
-#endif
 
     return 0;
 
@@ -509,14 +526,14 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 
     oct_idx = oct_dev->octeon_id;
 
-    cavium_print_msg("OCT_PHC[%d]: Stopping octeon device\n", oct_idx);
+    dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Stopping octeon device\n", oct_idx);
     if (cavium_atomic_read(&oct_dev->status) == OCT_DEV_CHECK_FW) {
 	    cavium_atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
 	    while (true) {
 		    if (cavium_atomic_read(&oct_dev->status) == OCT_DEV_STATE_INVALID)
 			    return;
 
-		    cavium_error("OCT_PHC[%d]: Waiting for firmware ready work to end.\n",
+		    dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Waiting for firmware ready work to end.\n",
 				 oct_idx);
 		    schedule_timeout_interruptible(HZ * 1);
 	    }
@@ -549,7 +566,7 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
     octeon_free_device_mem(oct_dev);
 
 before_exit:
-    cavium_print_msg("OCT_PHC[%d]: Octeon device removed\n", oct_idx);
+    dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon device removed\n", oct_idx);
 }
 
 

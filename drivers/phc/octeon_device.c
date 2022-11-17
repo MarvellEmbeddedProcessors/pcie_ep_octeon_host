@@ -62,7 +62,7 @@ octeon_device_t* octeon_allocate_device_mem(int pci_id)
 		break;
 
 	default:
-		cavium_print_msg("%s: Unknown PCI Device: 0x%x\n", __FUNCTION__,
+		printk(KERN_ERR "%s: Unknown PCI Device: 0x%x\n", __FUNCTION__,
 				 pci_id);
 		return(NULL);
 	}
@@ -104,15 +104,15 @@ octeon_device_t* octeon_allocate_device(int pci_id)
 	}
 
 	if (oct_idx == MAX_OCTEON_DEVICES) {
-		cavium_error
-			("OCT_PHC: Could not find empty slot for device pointer. octeon_device_count: %d MAX_OCTEON_DEVICES: %d\n",
+		dev_err(&oct_dev->pci_dev->dev,
+			"OCT_PHC: Could not find empty slot for device pointer. octeon_device_count: %d MAX_OCTEON_DEVICES: %d\n",
 			 octeon_device_count, MAX_OCTEON_DEVICES);
 		goto out;
 	}
 
 	oct_dev = octeon_allocate_device_mem(pci_id);
 	if (oct_dev == NULL) {
-		cavium_error("OCT_PHC: Allocation failed for octeon device\n");
+		dev_err(&oct_dev->pci_dev->dev, "OCT_PHC: Allocation failed for octeon device\n");
 		goto out;
 	}
 
@@ -141,7 +141,7 @@ void cavium_delete_proc(octeon_device_t *oct_dev)
 
 void octeon_unmap_pci_barx(octeon_device_t *oct_dev, int baridx)
 {
-	cavium_print(PRINT_DEBUG,
+	dev_info(&oct_dev->pci_dev->dev,
 		     "OCT_PHC[%d]: Freeing PCI mapped regions for Bar%d\n",
 		     oct_dev->octeon_id, baridx);
 
@@ -214,7 +214,7 @@ void octeon_destroy_resources(octeon_device_t *oct_dev)
 			octeon_unmap_pci_barx(oct_dev, 2);
 		}
 
-		cavium_print_msg("OCT_PHC[%d]: BAR unmapped.\n",
+		dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: BAR unmapped.\n",
 				 oct_dev->octeon_id);
 #if __GNUC__ > 6
 		__attribute__((__fallthrough__));
@@ -232,24 +232,24 @@ static int cn93xx_get_pcie_qlmport(octeon_device_t *oct_dev)
 {
 	oct_dev->pcie_port = octeon_read_csr64(oct_dev, CN93XX_SDP_MAC_NUMBER) & 0xff;
 
-	cavium_print_msg("OCT_PHC[%d]: CN9xxx uses PCIE Port %d\n",
+	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: CN9xxx uses PCIE Port %d\n",
 			 oct_dev->octeon_id, oct_dev->pcie_port);
 	/* If port is 0xff, PCIe read failed, return error */
 	return(oct_dev->pcie_port == 0xff);
 }
-static int cnxk_get_pcie_qlmport(octeon_device_t * oct)
+static int cnxk_get_pcie_qlmport(octeon_device_t * oct_dev)
 {
 	uint64_t sdp_mac;
 
-	sdp_mac = octeon_read_csr64(oct, CNXK_SDP_MAC_NUMBER);
-	oct->pcie_port = sdp_mac & 0xff;
+	sdp_mac = octeon_read_csr64(oct_dev, CNXK_SDP_MAC_NUMBER);
+	oct_dev->pcie_port = sdp_mac & 0xff;
 
-	cavium_print_msg("OCTEON[%d]: CNXK uses PCIE Port %d and PEM %d\n",
-			 oct->octeon_id, oct->pcie_port,
+	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: CNXK uses PCIE Port %d and PEM %d\n",
+			 oct_dev->octeon_id, oct_dev->pcie_port,
 			 (uint8_t)((sdp_mac >> 16) & 0xff));
 
 	/* If port is 0xff, PCIe read failed, return error */
-	return (oct->pcie_port == 0xff);
+	return (oct_dev->pcie_port == 0xff);
 }
 
 static void cn93xx_setup_reg_address(octeon_device_t *oct_dev)
@@ -347,8 +347,8 @@ int octeon_map_pci_barx(octeon_device_t *oct_dev, int baridx, int max_map_len)
 	unsigned long mapped_len = 0;
 
 	if (pci_request_region(oct_dev->pci_dev, baridx * 2, DRIVER_NAME)) {
-		cavium_error
-			("OCT_PHC[%d]: pci_request_region failed for bar %d\n",
+		dev_err(&oct_dev->pci_dev->dev,
+			"OCT_PHC[%d]: pci_request_region failed for bar %d\n",
 			 oct_dev->octeon_id, baridx);
 		return(1);
 	}
@@ -368,7 +368,7 @@ int octeon_map_pci_barx(octeon_device_t *oct_dev, int baridx, int max_map_len)
 		ioremap(oct_dev->mmio[baridx].start, mapped_len);
 	oct_dev->mmio[baridx].mapped_len = mapped_len;
 
-	cavium_print(PRINT_DEBUG,
+	dev_info(&oct_dev->pci_dev->dev,
 		     "OCT_PHC[%d]: BAR%d start: 0x%lx mapped %lu of %lu bytes\n",
 		     oct_dev->octeon_id, baridx, oct_dev->mmio[baridx].start,
 		     mapped_len, oct_dev->mmio[baridx].len);
@@ -379,7 +379,7 @@ int octeon_map_pci_barx(octeon_device_t *oct_dev, int baridx, int max_map_len)
 	       mapped_len, oct_dev->mmio[baridx].len, (unsigned long long)oct_dev->mmio[baridx].hw_addr);
 
 	if (!oct_dev->mmio[baridx].hw_addr) {
-		cavium_error("OCT_PHC[%d]: error ioremap for bar %d\n",
+		dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: error ioremap for bar %d\n",
 			     oct_dev->octeon_id, baridx);
 		return(1);
 	}
@@ -400,7 +400,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 	oct_dev->rev_id = rev_id & 0xff;
 
 	if (dev_id != OCTEON_PHC_PCIID_PF) {
-	    cavium_error("OCT_PHC[%d]: Unknown device found (dev_id: %x)\n",
+	    dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Unknown device found (dev_id: %x)\n",
 			 oct_dev->octeon_id, dev_id);
 	    return(-1);
 	}
@@ -416,7 +416,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 	case OCTEON_CN95N_PCIID_PF:
 	case OCTEON_CN95O_PCIID_PF:
 	case OCTEON_CN93XX_PCIID_PF:
-		cavium_print_msg("OCT_PHC[%d]: CN93XX PASS%d.%d\n",
+		dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: CN93XX PASS%d.%d\n",
 				 oct_dev->octeon_id, OCTEON_MAJOR_REV(oct_dev),
 				 OCTEON_MINOR_REV(oct_dev));
 		oct_dev->pf_num = oct_dev->octeon_id;
@@ -433,65 +433,33 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 
 		/* TODO: It is not required */
 		if (octeon_map_pci_barx(oct_dev, 1, MAX_BAR1_IOREMAP_SIZE)) {
-			cavium_error("%s CN93XX BAR1 map failed\n", __FUNCTION__);
+			dev_err(&oct_dev->pci_dev->dev, "%s CN93XX BAR1 map failed\n", __FUNCTION__);
 			octeon_unmap_pci_barx(oct_dev, 0);
 			return(-1);
 		}
 
 		/* BAR index 2 is BAR 4 on Octeon   */
 		if (octeon_map_pci_barx(oct_dev, 2, MAX_BAR1_IOREMAP_SIZE)) {
-			cavium_error("%s CN93XX BAR2 map failed\n", __FUNCTION__);
+			dev_err(&oct_dev->pci_dev->dev, "%s CN93XX BAR2 map failed\n", __FUNCTION__);
 			octeon_unmap_pci_barx(oct_dev, 0);
 			octeon_unmap_pci_barx(oct_dev, 1);
 			return(-1);
 		}
 		/* Update pcie port number in the device structure */
 		if (cn93xx_get_pcie_qlmport(oct_dev)) {
-			cavium_error("%s Invalid PCIe port\n", __FUNCTION__);
+			dev_err(&oct_dev->pci_dev->dev, "%s Invalid PCIe port\n", __FUNCTION__);
 			ret = -1;
 			goto free_barx;
 		}
 
 		cn93xx_setup_reg_address(oct_dev);
-#if 0
-		/* Firmware status CSR is supposed to be cleared by
-		 * core domain reset, but due to a hw bug, it is not.
-		 * Set it to RUNNING early in boot, so that unexpected resets
-		 * leave it in a state that is not READY (1).
-		 */
-		printk("About to do OCTEON_PCI_WIN_WRITE\n");
-		OCTEON_PCI_WIN_WRITE(oct_dev, CN93XX_PEMX_CFG_WR((u64)oct_dev->pcie_port),
-				     0x84d0ull | (FW_STATUS_RUNNING << 32));
-		printk("Completed OCTEON_PCI_WIN_WRITE\n");
-#endif
-
-#if 0
-		ret = octeon_get_fw_info(oct_dev);
-		if (ret != 0)
-		goto free_barx;
-#endif
 		return(0);
 
-#if 0
-	case OCTEON_CN98XX_PCIID_PF:
-		cavium_print_msg("OCTEON[%d]: CN98XX PASS%d.%d on %02x:%02x:%x\n",
-				 oct_dev->octeon_id, OCTEON_MAJOR_REV(oct_dev),
-				 OCTEON_MINOR_REV(oct_dev), oct_dev->pci_dev->bus->number,
-				 PCI_SLOT(oct_dev->pci_dev->devfn),
-				 PCI_FUNC(oct_dev->pci_dev->devfn));
-
-		oct_dev->pf_num = oct_dev->octeon_id;
-		/* Enable it to stop loading the driver for PF1 */
-		oct_dev->sriov_info.num_vfs = num_vfs;
-		oct_dev->chip_id = OCTEON_CN98XX_ID_PF;
-		return setup_cn98xx_octeon_pf_device(oct_dev); //use 93xx PF setup for now
-
-#endif
 	case OCTEON_CN10KA_PCIID_PF:
 	case OCTEON_CNF10KA_PCIID_PF:
 	case OCTEON_CN10KB_PCIID_PF:
 	case OCTEON_CNF10KB_PCIID_PF:
-		cavium_print_msg("OCTEON[%d]: CNXK PASS%d.%d on %02x:%02x:%x\n",
+		dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: CNXK PASS%d.%d on %02x:%02x:%x\n",
 				 oct_dev->octeon_id, OCTEON_MAJOR_REV(oct_dev),
 				 OCTEON_MINOR_REV(oct_dev), oct_dev->pci_dev->bus->number,
 				 PCI_SLOT(oct_dev->pci_dev->devfn),
@@ -509,13 +477,13 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 			return -1;
 
 		if (octeon_map_pci_barx(oct_dev, 1, MAX_BAR1_IOREMAP_SIZE)) {
-			cavium_error("%s CNXK BAR1 map failed\n", __FUNCTION__);
+			dev_err(&oct_dev->pci_dev->dev, "%s CNXK BAR1 map failed\n", __FUNCTION__);
 			octeon_unmap_pci_barx(oct_dev, 0);
 			return -1;
 		}
 
 		if (octeon_map_pci_barx(oct_dev, 2, MAX_BAR1_IOREMAP_SIZE)) {
-			cavium_error("%s CNXK BAR4 map failed\n", __FUNCTION__);
+			dev_err(&oct_dev->pci_dev->dev, "%s CNXK BAR4 map failed\n", __FUNCTION__);
 			octeon_unmap_pci_barx(oct_dev, 0);
 			octeon_unmap_pci_barx(oct_dev, 1);
 			return -1;
@@ -530,7 +498,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 
 		return 0;
 	default:
-		cavium_error("OCT_PHC: Unknown device found (subsystem_id: %x)\n",
+		dev_err(&oct_dev->pci_dev->dev, "OCT_PHC: Unknown device found (subsystem_id: %x)\n",
 			     dev_id);
 	}
 free_barx:
@@ -550,7 +518,7 @@ uint64_t octeon_pci_bar4_read64(octeon_device_t *oct_dev, int baridx, uint64_t b
 {
 	if (baridx * OCTEON_BAR_4_MAPPING_SIZE + bar_offset + 8
 	    > oct_dev->mmio[2].mapped_len) {
-	    cavium_error("OCT_PHC[%d]: Invalid BAR4 index %d offset: 0x%llx, mapped len: 0x%lx",
+	    dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Invalid BAR4 index %d offset: 0x%llx, mapped len: 0x%lx",
 			 oct_dev->octeon_id, baridx, (unsigned long long)bar_offset, oct_dev->mmio[2].mapped_len);
 	    return 0;
 	}
@@ -561,7 +529,7 @@ void octeon_pci_bar4_write64(octeon_device_t *oct_dev, int baridx, uint64_t bar_
 {
 	if (baridx * OCTEON_BAR_4_MAPPING_SIZE + bar_offset + 8
 	    > oct_dev->mmio[2].mapped_len) {
-	    cavium_error("OCT_PHC[%d]: Invalid BAR4 index %d offset: 0x%llx",
+	    dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Invalid BAR4 index %d offset: 0x%llx",
 			 oct_dev->octeon_id, baridx, (unsigned long long)bar_offset);
 	    return;
 	}
