@@ -1026,9 +1026,9 @@ static void octep_hb_timeout_task(struct work_struct *work)
 
 	atomic_inc(&oct->hb_miss_cnt);
 	miss_cnt = atomic_read(&oct->hb_miss_cnt);
-	if (miss_cnt < oct->conf->max_hb_miss_cnt) {
+	if (miss_cnt < oct->conf->fw_info.hb_miss_count) {
 		queue_delayed_work(octep_wq, &oct->hb_task,
-				   msecs_to_jiffies(oct->conf->hb_interval * 1000));
+				   msecs_to_jiffies(oct->conf->fw_info.hb_interval));
 		return;
 	}
 
@@ -1181,8 +1181,7 @@ int octep_device_setup(struct octep_device *oct)
 
 	atomic_set(&oct->hb_miss_cnt, 0);
 	INIT_DELAYED_WORK(&oct->hb_task, octep_hb_timeout_task);
-	queue_delayed_work(octep_wq, &oct->hb_task,
-			   msecs_to_jiffies(oct->conf->hb_interval * 1000));
+
 	return 0;
 
 unsupported_dev:
@@ -1277,6 +1276,14 @@ static void octep_dev_setup_task(struct work_struct *work)
 		atomic_set(&oct->status, OCTEP_DEV_STATUS_ALLOC);
 		return;
 	}
+
+	octep_ctrl_net_get_info(oct, OCTEP_CTRL_NET_INVALID_VFID,
+				&oct->conf->fw_info);
+	dev_info(&oct->pdev->dev, "Heartbeat interval %u msecs Heartbeat miss count %u\n",
+		 oct->conf->fw_info.hb_interval,
+		 oct->conf->fw_info.hb_miss_count);
+	queue_delayed_work(octep_wq, &oct->hb_task,
+			   msecs_to_jiffies(oct->conf->fw_info.hb_interval));
 
 	netdev->netdev_ops = &octep_netdev_ops;
 	octep_set_ethtool_ops(netdev);

@@ -17,9 +17,6 @@
 #define CTRL_MBOX_MAX_PF	128
 #define CTRL_MBOX_SZ		(size_t)(0x400000 / CTRL_MBOX_MAX_PF)
 
-#define FW_HB_INTERVAL_IN_SECS		1
-#define FW_HB_MISS_COUNT		20
-
 /* Names of Hardware non-queue generic interrupts */
 static char *cnxk_non_ioq_msix_names[] = {
 	"epf_ire_rint",
@@ -278,8 +275,8 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 					   (0x400000ull * 8) +
 					   (link * CTRL_MBOX_SZ);
 
-	conf->hb_interval = FW_HB_INTERVAL_IN_SECS;
-	conf->max_hb_miss_cnt = FW_HB_MISS_COUNT;
+	conf->fw_info.hb_interval = OCTEP_DEFAULT_FW_HB_INTERVAL;
+	conf->fw_info.hb_miss_count = OCTEP_DEFAULT_FW_HB_MISS_COUNT;
 
 }
 
