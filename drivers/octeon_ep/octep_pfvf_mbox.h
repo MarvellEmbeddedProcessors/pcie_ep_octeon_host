@@ -11,6 +11,8 @@
 
 /* VF flags */
 #define OCTEON_PFVF_FLAG_MAC_SET_BY_PF  BIT_ULL(0) /* PF has set VF MAC address */
+#define OCTEON_SDP_16K_HW_FRS  16380UL
+#define OCTEON_SDP_64K_HW_FRS  65531UL
 
 enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_VERSION,
@@ -22,6 +24,7 @@ enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_SET_RX_STATE,
 	OCTEP_PFVF_MBOX_CMD_SET_LINK_STATUS,
 	OCTEP_PFVF_MBOX_CMD_GET_LINK_STATUS,
+	OCTEP_PFVF_MBOX_CMD_GET_MTU,
 	OCTEP_PFVF_MBOX_CMD_LAST,
 };
 
@@ -109,6 +112,12 @@ union octep_pfvf_mbox_word {
 		u64 rsvd:6;
 		u64 mtu:48;
 	} s_set_mtu;
+	struct {
+		u64 opcode:8;
+		u64 type:2;
+		u64 rsvd:6;
+		u64 mtu:48;
+	} s_get_mtu;
 	struct {
 		u64 opcode:8;
 		u64 type:2;
