@@ -13,7 +13,6 @@
 #define _CAVIUM_DEFS_H
 
 #include "octeon-error.h"
-#include "octeon_stats.h"
 
 /* This flag is disabled by default.
    Enable this flag to support the deprecated octeon_soft_request_t structure.

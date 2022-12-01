@@ -107,19 +107,6 @@
 #define cavium_strchr strchr
 #define cavium_snprintf snprintf
 
-#define   cavium_print_msg(format, ...)    printk( format, ## __VA_ARGS__)
-
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,9)
-#define   cavium_error(format, ...)         \
-    do {                                         \
-        if(printk_ratelimit())                  \
-            printk( format, ## __VA_ARGS__);    \
-    } while(0)
-#else
-#define   cavium_error(format, ...) printk( format, ## __VA_ARGS__)
-
-#endif
-
 #define   CAVIUM_INTERNAL_TIME(tmsecs)            ((tmsecs * HZ)/1000)
 
 /* Gives up the CPU for a timeout period.  */
@@ -248,12 +235,12 @@ static inline void cavium_kthread_destroy(cvm_kthread_t * t)
 
 static inline void cavium_kthread_set_cpu_affinity(cvm_kthread_t * t, int cpu)
 {
-	cavium_error("%s: Nothing implemented\n", __CVM_FUNCTION__);
+	printk(KERN_ERR "%s: Nothing implemented\n", __CVM_FUNCTION__);
 }
 
 static inline void cavium_kthread_run(cvm_kthread_t * t)
 {
-	cavium_error("%s: Nothing implemented\n", __CVM_FUNCTION__);
+	printk(KERN_ERR "%s: Nothing implemented\n", __CVM_FUNCTION__);
 }
 
 #else
@@ -333,8 +320,7 @@ cavium_atomic_check_and_sub(int val, cavium_atomic_t * ptr, char *file,
 			    int line)
 {
 	if ((cavium_atomic_read((ptr)) - val) < 0) {
-		cavium_error
-		    ("OCTEON: %s:%d Underflow in atomic value (%d) (attempt to subtract %d)\n",
+		printk(KERN_ERR "OCTEON: %s:%d Underflow in atomic value (%d) (attempt to subtract %d)\n",
 		     file, line, cavium_atomic_read((ptr)), val);
 		return 1;
 	}
@@ -346,7 +332,7 @@ static inline int
 cavium_atomic_check_and_dec(cavium_atomic_t * ptr, char *file, int line)
 {
 	if ((cavium_atomic_read((ptr)) - 1) < 0) {
-		cavium_error("OCTEON: %s:%d Underflow in atomic value (%d)\n",
+		printk(KERN_ERR "OCTEON: %s:%d Underflow in atomic value (%d)\n",
 			     file, line, cavium_atomic_read((ptr)));
 		return 1;
 	}
@@ -359,8 +345,7 @@ cavium_atomic_check_and_inc(cavium_atomic_t * ptr, int check_val, char *file,
 			    int line)
 {
 	if ((cavium_atomic_read((ptr)) + 1) > check_val) {
-		cavium_error
-		    ("OCTEON: %s:%d Overflow in atomic value (%d) (max: %d)\n",
+		printk(KERN_ERR "OCTEON: %s:%d Overflow in atomic value (%d) (max: %d)\n",
 		     file, line, cavium_atomic_read((ptr)), check_val);
 		return 1;
 	}
@@ -373,8 +358,7 @@ cavium_atomic_check_and_add(int val, cavium_atomic_t * ptr, int check_val,
 			    char *file, int line)
 {
 	if ((cavium_atomic_read((ptr)) + val) > check_val) {
-		cavium_error
-		    ("OCTEON: %s:%d Overflow in atomic value (%d) (attempt to add %d, max: %d)\n",
+		printk(KERN_ERR "OCTEON: %s:%d Overflow in atomic value (%d) (attempt to add %d, max: %d)\n",
 		     file, line, cavium_atomic_read((ptr)), val, check_val);
 		return 1;
 	}
@@ -600,8 +584,7 @@ static __inline void cavium_free_recv_pkt_buf(void *buf, uint32_t buf_type)
 		if (buf_type == OCT_BUFFER_TYPE_2)
 			free_recv_buffer(buf);
 		else
-			cavium_error
-			    ("OCTEON: Unknown recv buf type. Buffer not freed\n");
+			printk(KERN_ERR "OCTEON: Unknown recv buf type. Buffer not freed\n");
 	}
 }
 

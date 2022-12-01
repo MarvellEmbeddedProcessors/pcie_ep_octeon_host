@@ -245,7 +245,6 @@
 #define CFG_GET_DPI_PKIND(cfg)                  ((cfg)->core_cfg.dpi_pkind)
 #define CFG_GET_CORE_TICS_PER_US(cfg)           ((cfg)->core_cfg.core_tics_per_us)
 #define CFG_GET_COPROC_TICS_PER_US(cfg)         ((cfg)->core_cfg.coproc_tics_per_us)
-#define CFG_GET_APP_MODE(cfg)                   ((cfg)->core_cfg.app_mode)
 
 #define CFG_GET_PF_START_RING_NUM(cfg,pf)          ((cfg)->pf_sriov_cfg[pf].start_ring_num)
 #define CFG_GET_TOTAL_PF_RINGS(cfg,pf)             ((cfg)->pf_sriov_cfg[pf].total_pf_rings)

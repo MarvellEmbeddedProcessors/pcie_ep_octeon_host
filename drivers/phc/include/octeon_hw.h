@@ -11,7 +11,6 @@
 
 #include "octeon_main.h"
 #include "octeon_device.h"
-#include "octeon_reg_defs.h"
 
 static inline uint16_t OCTEON_MAJOR_REV(octeon_device_t * oct)
 {
@@ -65,10 +64,7 @@ static inline uint64_t OCTEON_PCI_WIN_READ(octeon_device_t * oct, uint64_t addr)
 {
 	uint64_t val64;
 
-	if (OCTEON_CN83XX_PF_OR_VF(oct->chip_id))
-		addr |= 1ull << 49; /* read 8 bytes */
-	else
-		addr |= 1ull << 53; /* read 8 bytes */
+	addr |= 1ull << 53; /* read 8 bytes */
 
 	OCTEON_WRITE64(oct->reg_list.pci_win_rd_addr, addr);
 	val64 = OCTEON_READ64(oct->reg_list.pci_win_rd_data);

@@ -364,8 +364,6 @@ int octeon_device_init(octeon_device_t *oct_dev)
 	cavium_init_proc(oct_dev);
 #endif
 
-	oct_dev->app_mode = CVM_DRV_INVALID_APP;
-
 	cavium_atomic_set(&oct_dev->status, OCT_DEV_HOST_OK);
 
 	cavium_atomic_set(&oct_dev->hostfw_hs_state, HOSTFW_HS_INIT);

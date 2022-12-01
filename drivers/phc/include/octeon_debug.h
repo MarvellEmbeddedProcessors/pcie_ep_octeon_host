@@ -122,17 +122,17 @@ static inline void cavium_error_print_data(uint8_t * data, int size)
 	int i;
 
 	if (data == NULL) {
-		cavium_print_msg("%s: NULL Pointer found\n", __CVM_FUNCTION__);
+		printk(KERN_ERR "%s: NULL Pointer found\n", __CVM_FUNCTION__);
 		return;
 	}
 
-	cavium_print_msg("Printing %d bytes @ 0x%p\n", size, data);
+	printk("Printing %d bytes @ 0x%p\n", size, data);
 	for (i = 0; i < size; i++) {
 		if (!(i & 0x7))
-			cavium_print_msg("\n");
-		cavium_print_msg(" %02x", data[i]);
+			printk("\n");
+		printk(KERN_CONT " %02x", data[i]);
 	}
-	cavium_print_msg("\n");
+	printk("\n");
 }
 
 #endif /*__OCTEON_DEBUG_H__*/

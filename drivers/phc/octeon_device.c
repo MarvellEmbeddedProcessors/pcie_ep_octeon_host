@@ -2,11 +2,9 @@
  * SPDX-License-Identifier: GPL-2.0
  */
 
-#include "barmap.h"
 #include "octeon_device.h"
 #include "octeon_macros.h"
 #include "octeon_mem_ops.h"
-#include "oct_config_data.h"
 #include "octeon_compat.h"
 #include "octeon-pci.h"
 
@@ -19,16 +17,6 @@ uint32_t octeon_device_count = 0;
 void octeon_free_device_mem(octeon_device_t *oct_dev)
 {
 	int i;
-
-	for (i = 0; i < oct_dev->num_oqs; i++) {
-		if (oct_dev->droq[i])
-			cavium_free_virt(oct_dev->droq[i]);
-	}
-
-	for (i = 0; i < oct_dev->num_iqs; i++) {
-		if (oct_dev->instr_queue[i])
-			cavium_free_virt(oct_dev->instr_queue[i]);
-	}
 
 	i = oct_dev->octeon_id;
 	cavium_free_virt(oct_dev);
@@ -46,7 +34,6 @@ octeon_device_t* octeon_allocate_device_mem(int pci_id)
 
 
 	case OCTEON_CN93XX_ID_PF:
-	case OCTEON_CN3380_ID_PF:
 	case OCTEON_CN98XX_ID_PF:
 	case OCTEON_CN95O_ID_PF:
 	case OCTEON_CN95N_ID_PF:
@@ -74,9 +61,7 @@ octeon_device_t* octeon_allocate_device_mem(int pci_id)
 	if (octdevsize & 0x7)
 		octdevsize += (8 - (octdevsize & 0x7));
 
-	size =
-		octdevsize + configsize +
-		(sizeof(octeon_dispatch_t) * DISPATCH_LIST_SIZE);
+	size = octdevsize + configsize;
 	buf = cavium_alloc_virt(size);
 	if (buf == NULL)
 		return(NULL);
@@ -85,8 +70,6 @@ octeon_device_t* octeon_allocate_device_mem(int pci_id)
 
 	oct_dev = (octeon_device_t *)buf;
 	oct_dev->chip = (void *)(buf + octdevsize);
-	oct_dev->dispatch.dlist =
-		(octeon_dispatch_t *)(buf + octdevsize + configsize);
 
 	return(oct_dev);
 }
@@ -167,8 +150,6 @@ void octeon_destroy_resources(octeon_device_t *oct_dev)
 
 	case OCT_DEV_CORE_OK:
 		cavium_atomic_set(&oct_dev->status, OCT_DEV_IN_RESET);
-
-		oct_dev->app_mode = CVM_DRV_INVALID_APP;
 
 		cavium_sleep_timeout(CAVIUM_TICKS_PER_SEC / 10);
 #if __GNUC__ > 6

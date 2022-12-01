@@ -15,26 +15,12 @@
 typedef struct _OCTEON_DEVICE octeon_device_t;
 
 
-#include "octeon_stats.h"
-#include "octeon_iq.h"
-#include "octeon_instr.h"
-#include "octeon_droq.h"
-#include "pending_list.h"
-#include "response_manager.h"
 #include "octeon_debug.h"
 #include "octeon-common.h"
 
-/* OCTEON TX models */
-#include "cn83xx_pf_device.h"
-#include "cn83xx_vf_device.h"
-
 /* OCTEON TX2 models */
 #include "cn93xx_pf_device.h"
-#include "cn93xx_vf_device.h"
 #include "cnxk_pf_device.h"
-#include "cnxk_vf_device.h"
-#include "octeon_mbox.h"
-#include "barmap.h"
 
 #define PCI_DMA_64BIT                  0xffffffffffffffffULL
 
@@ -46,11 +32,6 @@ typedef struct _OCTEON_DEVICE octeon_device_t;
 
 /** OCTEON TX2 Models */
 #define  OCTEON_CN93XX_PCIID_PF       0xB200177d   //96XX
-#define  OCTEON_CN93XX_PCIID_VF       0xB203177d   //TODO:96XX VF
-
-#define  OCTEON_CN3380_PCIID_PF       0x3380177d   //LIO3
-#define  OCTEON_CN3383_PCIID_VF       0x3383177d   //TODO:LIO3 VF
-
 #define  OCTEON_CN98XX_PCIID_PF       0xB100177d   //98XX
 #define  OCTEON_CN98XX_PCIID_VF       0xB103177d   //TODO:98XX VF
 
@@ -77,17 +58,9 @@ typedef struct _OCTEON_DEVICE octeon_device_t;
     between chips, a value of 0 is used for revision id.
 */
 
-/** OCTEON TX MODELS */
-#define  OCTEON_CN83XX_ID_PF             0xA300
-#define  OCTEON_CN83XX_ID_VF             0xA303
-
 /** OCTEON TX2 MODELS */
 #define  OCTEON_CN93XX_ID_PF             0xB200   //96XX
 #define  OCTEON_CN93XX_ID_VF             0xB203   //TODO:96XX VF
-
-#define  OCTEON_CN3380_ID_PF             0x3380   //96XX
-#define  OCTEON_CN3380_ID_VF             0x3383   //TODO:96XX VF
-
 #define  OCTEON_CN98XX_ID_PF             0xB100   //98XX
 #define  OCTEON_CN98XX_ID_VF             0xB103   //TODO:98XX VF
 
@@ -108,9 +81,6 @@ typedef struct _OCTEON_DEVICE octeon_device_t;
 
 #define OCTEON_CN10KB_ID_PF		0xBD00
 #define OCTEON_CN10KB_ID_VF		0xBD03
-
-#define OCTEON_CN83XX_PF(chip_id) \
-	(chip_id == OCTEON_CN83XX_ID_PF)
 
 #define OCTEON_CN93XX_PF(chip_id) \
 	(chip_id == OCTEON_CN93XX_ID_PF)
@@ -135,16 +105,6 @@ typedef struct _OCTEON_DEVICE octeon_device_t;
 	  OCTEON_CN98XX_PF(chip_id) || \
 	  OCTEON_CNXK_PF(chip_id))
 
-#define OCTEON_CN8PLUS_PF(chip_id) \
-	(OCTEON_CN83XX_PF(chip_id) || \
-	 OCTEON_CN93XX_PF(chip_id) || \
-	 OCTEON_CN98XX_PF(chip_id) || \
-	 OCTEON_CNXK_PF(chip_id))
-
-
-#define OCTEON_CN83XX_VF(chip_id) \
-	(chip_id == OCTEON_CN83XX_ID_VF)
-
 #define OCTEON_CN93XX_VF(chip_id) \
 	(chip_id == OCTEON_CN93XX_ID_VF)
 
@@ -162,16 +122,6 @@ typedef struct _OCTEON_DEVICE octeon_device_t;
 	 (OCTEON_CN93XX_VF(chip_id) || \
 	  OCTEON_CN98XX_VF(chip_id) || \
 	  OCTEON_CNXK_VF(chip_id))
-
-#define OCTEON_CN8PLUS_VF(chip_id) \
-	(OCTEON_CN83XX_VF(chip_id) || \
-	 OCTEON_CN93XX_VF(chip_id) || \
-	 OCTEON_CN98XX_VF(chip_id) || \
-	 OCTEON_CNXK_VF(chip_id))
-
-#define OCTEON_CN83XX_PF_OR_VF(chip_id) \
-	((OCTEON_CN83XX_PF(chip_id)) || \
-	 (OCTEON_CN83XX_VF(chip_id)))
 
 #define OCTEON_CN93XX_PF_OR_VF(chip_id) \
 	((OCTEON_CN93XX_PF(chip_id)) || \
@@ -193,9 +143,6 @@ typedef struct _OCTEON_DEVICE octeon_device_t;
 	((OCTEON_CN9PLUS_PF(chip_id)) || \
 	 (OCTEON_CN9PLUS_VF(chip_id)))
 
-#define OCTEON_CN8PLUS_PF_OR_VF(chip_id) \
-	((OCTEON_CN8PLUS_PF(chip_id)) || \
-	 (OCTEON_CN8PLUS_VF(chip_id)))
 
 /** Endian-swap modes supported by Octeon. */
 enum octeon_pci_swap_mode {
@@ -265,47 +212,7 @@ enum {
 #define OTX2_PKIND		OTX2_GENERIC_PCIE_EP_PKIND
 #endif
 
-typedef void (*cavium_oei_cb_t)(octeon_device_t *oct);
 
-/*---------------------------DISPATCH LIST-------------------------------*/
-
-/** The dispatch list entry.
- *  The driver keeps a record of functions registered for each 
- *  response header opcode in this structure. Since the opcode is
- *  hashed to index into the driver's list, more than one opcode
- *  can hash to the same entry, in which case the list field points
- *  to a linked list with the other entries.
- */
-typedef struct {
-
-  /** List head for this entry */
-	cavium_list_t list;
-
-  /** The opcode for which the above dispatch function & arg should be
-      used */
-	octeon_opcode_t opcode;
-
-  /** The function to be called for a packet received by the driver */
-	octeon_dispatch_fn_t dispatch_fn;
-
-  /** The application specified argument to be passed to the above
-      function along with the received packet */
-	void *arg;
-
-} octeon_dispatch_t;
-
-/** The dispatch list structure. */
-typedef struct {
-
-	cavium_spinlock_t lock;
-
-	/** Count of dispatch functions currently registered */
-	uint32_t count;
-
-	/** The list of dispatch functions */
-	octeon_dispatch_t *dlist;
-
-} octeon_dispatch_list_t;
 
 /*-----------------------  THE OCTEON DEVICE  ---------------------------*/
 
@@ -398,7 +305,6 @@ struct octeon_fn_list {
 	void (*bar1_idx_setup) (struct _OCTEON_DEVICE *, uint64_t, int, int);
 	void (*bar1_idx_write) (struct _OCTEON_DEVICE *, int, uint32_t);
 	 uint32_t(*bar1_idx_read) (struct _OCTEON_DEVICE *, int);
-	 uint32_t(*update_iq_read_idx) (octeon_instr_queue_t *);
 
 	void (*enable_oq_pkt_time_intr) (octeon_device_t *, int);
 	void (*disable_oq_pkt_time_intr) (octeon_device_t *, int);
@@ -415,10 +321,6 @@ struct octeon_fn_list {
 	void (*disable_output_queue) (struct _OCTEON_DEVICE *, int);
 	void (*force_io_queues_off) (struct _OCTEON_DEVICE *);
 	void (*dump_registers) (struct _OCTEON_DEVICE *);
-	int (*send_mbox_cmd)(struct _OCTEON_DEVICE *otx_epvf, union otx_vf_mbox_word cmd,
-			     union otx_vf_mbox_word *rsp);
-	int (*send_mbox_cmd_nolock)(struct _OCTEON_DEVICE *otx_epvf, union otx_vf_mbox_word cmd,
-				    union otx_vf_mbox_word *rsp);
 
 };
 
@@ -466,49 +368,6 @@ typedef struct cvm_sriov_info {
 	uint32_t vf_srn;
 } octeon_sriov_info_t;
 
-typedef struct octeon_mbox_data {
-	uint32_t cmd;
-	uint32_t total_len;
-	uint32_t recv_len;
-	uint32_t rsvd;
-	uint64_t *data;
-
-} octeon_mbox_data_t;
-
-typedef struct cvm_mbox_info {
-	uint32_t q_no;
-	uint32_t state;
-	/** SLI_MAC_PF_MBOX_INT for PF, SLI_PKT_MBOX_INT for VF. */
-	void *mbox_int_reg;
-	/** SLI_PKT_PF_VF_MBOX_SIG(0) for PF, SLI_PKT_PF_VF_MBOX_SIG(1) for VF. */
-	void *mbox_write_reg;
-	/** SLI_PKT_PF_VF_MBOX_SIG(1) for PF, SLI_PKT_PF_VF_MBOX_SIG(0) for VF. */
-	void *mbox_read_reg;
-	octeon_mbox_data_t mbox_data;
-
-	/* added for new mail box */
-	cavium_mutex_t lock;
-	uint32_t vf_id;
-	struct cavium_wk wk;
-	octeon_device_t *oct;
-	uint64_t *pf_vf_data_reg;
-	uint64_t *vf_pf_data_reg;
-	int32_t config_data_index;
-	int32_t message_len;
-	uint8_t config_data[MBOX_MAX_DATA_BUF_SIZE];
-} octeon_mbox_t;
-
-typedef struct cvm_ioq_vector {
-
-	octeon_device_t *oct_dev;
-	octeon_instr_queue_t *iq;
-	octeon_droq_t *droq;
-	octeon_mbox_t *mbox;
-	cpumask_t affinity_mask;
-	uint32_t ioq_num;
-
-} octeon_ioq_vector_t;
-
 #define OCTEON_NON_SRIOV_MODE                 (1 << 0)
 #define OCTEON_SRIOV_MODE                     (1ULL << 1)
 #define OCTEON_MSIX_CAPABLE                   (1 << 2)
@@ -541,16 +400,6 @@ struct oct_ep_ptp_clock {
 struct _OCTEON_DEVICE {
 	/** work queue to initialize device */
 	struct cavium_delayed_wq dev_init_wq;
-
-	int num_iqs;
-
-	/** The input instruction queues */
-	octeon_instr_queue_t *instr_queue[MAX_OCTEON_INSTR_QUEUES];
-
-	int num_oqs;
-
-	/** The DROQ output queues  */
-	octeon_droq_t *droq[MAX_OCTEON_OUTPUT_QUEUES];
 
    /** Lock for this Octeon device */
 	cavium_spinlock_t oct_lock;
@@ -608,25 +457,15 @@ struct _OCTEON_DEVICE {
 //   uint32_t                 pend_list_size;
 //   octeon_pending_list_t    *plist;
 
-   /** The doubly-linked list of instruction response */
-	octeon_response_list_t response_list[MAX_RESPONSE_LISTS];
    /** A table maintaining maps of core-addr to BAR1 mapped address. */
 	octeon_range_table_t range_table[MAX_OCTEON_MAPS];
 
    /** Total number of core-address ranges mapped (Upto 32). */
 	uint32_t map_count;
 
-	octeon_io_enable_t io_qmask;
-
-   /** List of dispatch functions */
-	octeon_dispatch_list_t dispatch;
-
 
    /** The /proc file entries */
 	void *proc_root_dir;
-
-   /** Statistics for this octeon device. Does not include IQ, DROQ stats */
-	oct_dev_stats_t stats;
 
    /** IRQ assigned to this device. */
 	int irq;
@@ -647,20 +486,10 @@ struct _OCTEON_DEVICE {
    /** PF device's sr-iov information.  */
 	octeon_sriov_info_t sriov_info;
 
-   /** Mail Box details of each octeon queue. */
-	octeon_mbox_t *mbox[MAX_OCTEON_OUTPUT_QUEUES];
-
-   /** IOq information of it's corresponding MSI-X interrupt. */
-	octeon_ioq_vector_t *ioq_vector[MAX_MSIX_VECTORS];
-
 	uint64_t drv_flags;
 
    /** Rings per Virtual Function. */
 	int rings_per_vf;
-
-   /** The core application is running in this mode. See octeon-drv-opcodes.h
-       for values. */
-	int app_mode;
 
    /** The name given to this device. */
 	char device_name[32];
@@ -687,23 +516,6 @@ struct _OCTEON_DEVICE {
 
 	/* module handler status */
 	cavium_atomic_t mod_status[OCTEON_MAX_MODULES];
-
-	struct npu_bar_map npu_memmap_info;
-	mv_facility_conf_t facility_conf[MV_FACILITY_COUNT];
-	mv_facility_event_cb_t facility_handler[MV_FACILITY_COUNT];
-	cavium_oei_cb_t oei_irq_handler;
-	int is_alive_flag;	/* flag set by irq handler if alive */
-	int heartbeat_miss_cnt; /* count of missed alive checks */
-	/* VFs info */
-	struct octep_vf_info vf_info[MAX_OCTEON_DEVICES];
-
-	int mbox_cmd_id;
-
-	uint8_t mbox_data_buf[MBOX_MAX_DATA_BUF_SIZE];
-
-	int32_t mbox_data_index;
-
-	int32_t mbox_rcv_message_len;
 
 	/* PHC related fields */
 	struct cavium_delayed_wq dev_poll_wq;
@@ -813,8 +625,6 @@ int octeon_stop_module(uint32_t app_type, uint32_t octeon_id);
 
 char *get_oct_state_string(cavium_atomic_t * state_ptr);
 
-char *get_oct_app_string(int app_mode);
-
 int octeon_setup_instr_queues(octeon_device_t * oct);
 
 int octeon_setup_output_queues(octeon_device_t * oct);
@@ -822,8 +632,6 @@ int octeon_setup_output_queues(octeon_device_t * oct);
 int octeon_setup_mbox(octeon_device_t * oct);
 
 int octeon_enable_msix_interrupts(octeon_device_t * oct);
-
-void octeon_enable_irq(octeon_droq_t *droq, octeon_instr_queue_t *iq);
 
 int octeon_allocate_ioq_vector(octeon_device_t * oct);
 
