@@ -6,12 +6,7 @@ KERNEL_DIR ?= /lib/modules/$(shell uname -r)/build
 
 SRCS = ep_phc.c octeon_device.c
 
-PCIE_HOST ?= $(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/src/host/linux/kernel/drv
-INCLUDE_DIR = -I$(src) -I$(PCIE_HOST) \
-	-I$(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/inc \
-	-I$(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/src/common \
-	-I$(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/src/host/osi \
-	-I$(OCTEONTX_HOST_ROOT)/drivers/legacy/modules/driver/src/host/osi/octvf
+INCLUDE_DIR = -I$(OCTEONTX_HOST_ROOT)/drivers/phc/include
 
 
 
