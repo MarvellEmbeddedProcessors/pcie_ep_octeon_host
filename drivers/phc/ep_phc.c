@@ -57,9 +57,40 @@ static struct pci_driver octeon_ep_phc_pci_driver = {
 	.probe = octeon_ep_phc_probe,
 	.remove = octeon_ep_phc_remove,
 };
+static ssize_t octeon_ep_phc_sysfs_device_show(struct kobject *kobj,
+					       struct kobj_attribute *attr,
+					       char *buf);
 
+static struct kobj_attribute phc_ptp_attribute = {
+	.attr = {
+		.name = "ptp_device",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = octeon_ep_phc_sysfs_device_show,
+	.store = NULL,
+};
+static struct kobj_attribute phc_pcie_attribute = {
+	.attr = {
+		.name = "pcie_device",
+		.mode = S_IWUSR | S_IRUGO,
+	},
+	.show = octeon_ep_phc_sysfs_device_show,
+	.store = NULL,
+};
 
-
+/*
+ * We need our own kobj type, as we want to use container_of() to get
+ * the owning octeon_device_t, but that doesn't work with pointers.
+ * We manage the kobj lifetime along with the octeon_device_t lifetime, so
+ * phc_kobj_release() does nothing.
+ */
+static void phc_kobj_release(struct kobject *kobj)
+{
+}
+static struct kobj_type phc_kobj_type = {
+	.release = &phc_kobj_release,
+	.sysfs_ops = &kobj_sysfs_ops,
+};
 
 
 /*
@@ -279,6 +310,28 @@ static int octeon_pci_os_setup(octeon_device_t *oct_dev)
 
 	return 0;
 }
+
+
+static ssize_t octeon_ep_phc_sysfs_device_show(struct kobject *kobj,
+					       struct kobj_attribute *attr,
+					       char *buf)
+{
+	octeon_device_t *oct_dev;
+
+	oct_dev = container_of(kobj, struct _OCTEON_DEVICE, phc_sysfs_kobject);
+
+	if (!strcmp(attr->attr.name, "ptp_device")) {
+		return sprintf(buf, "ptp%d\n",
+			       ptp_clock_index(oct_dev->oct_ep_ptp_clock->ptp_clock));
+	}
+	else {
+		return sprintf(buf, "%x:%x:%x\n",
+			       oct_dev->pci_dev->bus->number,
+			       PCI_SLOT(oct_dev->pci_dev->devfn),
+			       PCI_FUNC(oct_dev->pci_dev->devfn));
+	}
+}
+
 /* Device initialization for each Octeon device. */
 int octeon_device_init(octeon_device_t *oct_dev)
 {
@@ -324,6 +377,7 @@ static void octeon_device_init_work(struct work_struct *work)
 	octeon_device_t *oct_dev;
 	struct cavium_delayed_wq *wq;
 	u8 status;
+	int retval;
 
 	wq = container_of(work, struct cavium_delayed_wq, wk.work.work);
 	oct_dev = (octeon_device_t *)wq->wk.ctxptr;
@@ -392,6 +446,31 @@ static void octeon_device_init_work(struct work_struct *work)
 		 PCI_SLOT(oct_dev->pci_dev->devfn),
 		 PCI_FUNC(oct_dev->pci_dev->devfn),
 		 ptp_clock_index(oct_dev->oct_ep_ptp_clock->ptp_clock));
+
+	retval = kobject_init_and_add(&oct_dev->phc_sysfs_kobject, &phc_kobj_type, kernel_kobj, "oct_phc%d", oct_dev->octeon_id);
+	if (retval < 0) {
+		dev_info(&oct_dev->pci_dev->dev,
+			 "OCT_PHC[%d]: Error allocating kobject for sysfs\n",
+			 oct_dev->octeon_id);
+		kobject_put(&oct_dev->phc_sysfs_kobject);
+	}
+	else
+	{
+		retval = sysfs_create_file(&oct_dev->phc_sysfs_kobject, &phc_ptp_attribute.attr);
+		if (retval) {
+			dev_info(&oct_dev->pci_dev->dev,
+				 "OCT_PHC[%d]: Error creating sysfs file\n",
+				 oct_dev->octeon_id);
+		}
+		retval = sysfs_create_file(&oct_dev->phc_sysfs_kobject, &phc_pcie_attribute.attr);
+		if (retval) {
+			dev_info(&oct_dev->pci_dev->dev,
+				 "OCT_PHC[%d]: Error creating sysfs file\n",
+				 oct_dev->octeon_id);
+		}
+	}
+
+
 #ifdef PHC_DEBUG
 	oct_dev->dev_poll_wq.wq = alloc_workqueue("dev_poll_wq", WQ_MEM_RECLAIM, 0);
 	oct_dev->dev_poll_wq.wk.ctxptr = oct_dev;
@@ -556,6 +635,10 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 
     ptp_clock_unregister(oct_dev->oct_ep_ptp_clock->ptp_clock);
     kfree(oct_dev->oct_ep_ptp_clock);
+
+	sysfs_remove_file(&oct_dev->phc_sysfs_kobject, &phc_ptp_attribute.attr);
+	sysfs_remove_file(&oct_dev->phc_sysfs_kobject, &phc_pcie_attribute.attr);
+	kobject_put(&oct_dev->phc_sysfs_kobject);
 
     /* Reset the octeon device and cleanup all memory allocated for
        the octeon device by driver. */
