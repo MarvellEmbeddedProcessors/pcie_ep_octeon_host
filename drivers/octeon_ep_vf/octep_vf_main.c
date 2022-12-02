@@ -925,6 +925,7 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 	switch (oct->chip_id) {
 	case OCTEP_PCI_DEVICE_ID_CN93_VF:
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
+	case OCTEP_PCI_DEVICE_ID_CN98_VF:
 		dev_info(&pdev->dev, "Setting up OCTEON %s VF PASS%d.%d\n",
 			 octep_vf_devid_to_str(oct), OCTEP_VF_MAJOR_REV(oct),
 			 OCTEP_VF_MINOR_REV(oct));
