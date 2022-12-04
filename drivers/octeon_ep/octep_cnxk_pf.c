@@ -661,8 +661,13 @@ static u32 octep_update_iq_read_index_cnxk_pf(struct octep_iq *iq)
 	u32 pkt_in_done = readl(iq->inst_cnt_reg);
 	u32 last_done, new_idx;
 
-	last_done = pkt_in_done - iq->pkt_in_done;
-	iq->pkt_in_done = pkt_in_done;
+	if (unlikely(pkt_in_done == 0xFFFFFFFF)) {
+		last_done = 0;
+		dev_emerg(iq->dev, "IQ-%u count read failure\n", iq->q_no);
+	} else {
+		last_done = pkt_in_done - iq->pkt_in_done;
+		iq->pkt_in_done = pkt_in_done;
+	}
 
 	new_idx = (iq->octep_read_index + last_done) % iq->max_count;
 
