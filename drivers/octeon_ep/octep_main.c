@@ -41,6 +41,8 @@ MODULE_AUTHOR("Veerasenareddy Burru <vburru@marvell.com>");
 MODULE_DESCRIPTION(OCTEP_DRV_STRING);
 MODULE_LICENSE("GPL");
 
+static int octep_sriov_disable(struct octep_device *oct);
+
 /**
  * octep_alloc_ioq_vectors() - Allocate Tx/Rx Queue interrupt info.
  *
@@ -1398,6 +1400,7 @@ static void octep_remove(struct pci_dev *pdev)
 		return;
 
 	dev_info(&pdev->dev, "Removing device.\n");
+	octep_sriov_disable(oct);
 	status = atomic_read(&oct->status);
 	if (status <= OCTEP_DEV_STATUS_ALLOC)
 		goto free_resources;
