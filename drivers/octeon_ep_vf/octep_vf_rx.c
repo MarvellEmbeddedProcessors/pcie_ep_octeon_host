@@ -321,6 +321,11 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 	u32 pkt_count, new_pkts;
 
 	pkt_count = readl(oq->pkts_sent_reg);
+	if (unlikely(pkt_count == 0xFFFFFFFF)) {
+		pkt_count = 0;
+		dev_emerg(oq->dev, "OQ-%u count read failure\n", oq->q_no);
+		return 0;
+	}
 	new_pkts = pkt_count - oq->last_pkt_count;
 
 	/* Clear the hardware packets counter register if the rx queue is
