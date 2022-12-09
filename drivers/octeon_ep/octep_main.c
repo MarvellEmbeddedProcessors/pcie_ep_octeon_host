@@ -1400,11 +1400,12 @@ static void octep_remove(struct pci_dev *pdev)
 		return;
 
 	dev_info(&pdev->dev, "Removing device.\n");
-	octep_sriov_disable(oct);
 	status = atomic_read(&oct->status);
 	if (status <= OCTEP_DEV_STATUS_ALLOC)
 		goto free_resources;
 
+	if (status == OCTEP_DEV_STATUS_READY)
+		octep_sriov_disable(oct);
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
 	if (status == OCTEP_DEV_STATUS_WAIT_FOR_FW) {
 		cancel_work_sync(&oct->dev_setup_task);
@@ -1455,7 +1456,11 @@ static int octep_sriov_enable(struct octep_device *oct, int num_vfs)
 static int octep_sriov_configure(struct pci_dev *pdev, int num_vfs)
 {
 	struct octep_device *oct = pci_get_drvdata(pdev);
-	int max_nvfs;
+	int max_nvfs, status;
+
+	status = atomic_read(&oct->status);
+	if (status != OCTEP_DEV_STATUS_READY)
+		return -EAGAIN;
 
 	if (num_vfs == 0)
 		return octep_sriov_disable(oct);
