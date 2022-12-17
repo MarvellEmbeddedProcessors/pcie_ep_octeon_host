@@ -172,6 +172,10 @@ int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox,
 	q = &mbox->h2fq;
 	pi = readl(q->hw_prod);
 	ci = readl(q->hw_cons);
+	if (unlikely(pi == 0xFFFFFFFFU || ci == 0xFFFFFFFFU)) {
+		mutex_unlock(&mbox->f2hq_lock);
+		return -EIO;
+	}
 	for (m = 0; m < num; m++) {
 		msg = &msgs[m];
 		if (!msg)
@@ -199,6 +203,10 @@ int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox,
 	}
 	writel(pi, q->hw_prod);
 	mutex_unlock(&mbox->h2fq_lock);
+
+	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) !=
+	    OCTEP_CTRL_MBOX_STATUS_READY)
+		return -EIO;
 
 	return (m) ? m : -EAGAIN;
 }
@@ -254,6 +262,10 @@ int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox,
 	q = &mbox->f2hq;
 	pi = readl(q->hw_prod);
 	ci = readl(q->hw_cons);
+	if (unlikely(pi == 0xFFFFFFFFU || ci == 0xFFFFFFFFU)) {
+		mutex_unlock(&mbox->f2hq_lock);
+		return -EIO;
+	}
 	for (m = 0; m < num; m++) {
 		q_depth = octep_ctrl_mbox_circq_depth(pi, ci, q->sz);
 		if (q_depth < mbox_hdr_sz)
@@ -284,6 +296,10 @@ int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox,
 	}
 	writel(ci, q->hw_cons);
 	mutex_unlock(&mbox->f2hq_lock);
+
+	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) !=
+	    OCTEP_CTRL_MBOX_STATUS_READY)
+		return -EIO;
 
 	return (m) ? m : -EAGAIN;
 }
