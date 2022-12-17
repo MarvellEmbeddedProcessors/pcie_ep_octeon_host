@@ -13,8 +13,8 @@
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/vmalloc.h>
-#include <linux/version.h>
 
+#include "octep_compat.h"
 #include "octep_config.h"
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
@@ -421,7 +421,7 @@ static void octep_napi_add(struct octep_device *oct)
 
 	for (i = 0; i < oct->num_oqs; i++) {
 		netdev_dbg(oct->netdev, "Adding NAPI on Q-%d\n", i);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,1,0)
+#if NAPI_ADD_HAS_BUDGET_ARG
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_napi_poll, 64);
 #else
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_napi_poll);
@@ -838,10 +838,10 @@ static void octep_tx_timeout_task(struct work_struct *work)
  *
  * Schedule a work to handle Tx queue timeout.
  */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0)
-static void octep_tx_timeout(struct net_device *netdev)
-#else
+#if TX_TIMEOUT_HAS_TXQ_ARG
 static void octep_tx_timeout(struct net_device *netdev, unsigned int txqueue)
+#else
+static void octep_tx_timeout(struct net_device *netdev)
 #endif
 {
 	struct octep_device *oct = netdev_priv(netdev);
@@ -864,7 +864,7 @@ static int octep_set_mac(struct net_device *netdev, void *p)
 		return err;
 
 	memcpy(oct->mac_addr, addr->sa_data, ETH_ALEN);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+#if defined(USE_ETHER_ADDR_COPY)
 	ether_addr_copy(netdev->dev_addr, addr->sa_data);
 #else
 	eth_hw_addr_set(netdev, addr->sa_data);
@@ -1299,7 +1299,7 @@ static void octep_dev_setup_task(struct work_struct *work)
 
 	octep_ctrl_net_get_mac_addr(oct, OCTEP_CTRL_NET_INVALID_VFID,
 				    oct->mac_addr);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,15,0)
+#if defined(USE_ETHER_ADDR_COPY)
 	ether_addr_copy(netdev->dev_addr, oct->mac_addr);
 	ether_addr_copy(netdev->perm_addr, oct->mac_addr);
 #else
