@@ -418,7 +418,7 @@ static void octep_vf_set_rx_state(struct octep_vf_device *oct, bool up)
 
 	err = octep_vf_mbox_set_rx_state(oct, up);
 	if (err)
-		netdev_err(oct->netdev, "Set Rx state to %d failed with err:%d\n", err, up);
+		netdev_err(oct->netdev, "Set Rx state to %d failed with err:%d\n", up, err);
 }
 
 static int octep_vf_get_link_status(struct octep_vf_device *oct)
