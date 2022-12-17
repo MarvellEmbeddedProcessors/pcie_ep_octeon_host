@@ -13,8 +13,8 @@
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/vmalloc.h>
-#include <linux/version.h>
 
+#include "octep_vf_compat.h"
 #include "octep_vf_config.h"
 #include "octep_vf_main.h"
 
@@ -351,7 +351,7 @@ static void octep_vf_napi_add(struct octep_vf_device *oct)
 
 	for (i = 0; i < oct->num_oqs; i++) {
 		netdev_dbg(oct->netdev, "Adding NAPI on Q-%d\n", i);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#if NAPI_ADD_HAS_BUDGET_ARG
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_vf_napi_poll, 64);
 #else
 		netif_napi_add(oct->netdev, &oct->ioq_vector[i]->napi, octep_vf_napi_poll);
@@ -816,10 +816,10 @@ static void octep_vf_tx_timeout_task(struct work_struct *work)
  *
  * Schedule a work to handle Tx queue timeout.
  */
-#if KERNEL_VERSION(5, 6, 0) >= LINUX_VERSION_CODE
-static void octep_vf_tx_timeout(struct net_device *netdev)
-#else
+#if TX_TIMEOUT_HAS_TXQ_ARG
 static void octep_vf_tx_timeout(struct net_device *netdev, unsigned int txqueue)
+#else
+static void octep_vf_tx_timeout(struct net_device *netdev)
 #endif
 {
 	struct octep_vf_device *oct = netdev_priv(netdev);
@@ -841,7 +841,7 @@ static int octep_vf_set_mac(struct net_device *netdev, void *p)
 		return err;
 
 	memcpy(oct->mac_addr, addr->sa_data, ETH_ALEN);
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if defined(USE_ETHER_ADDR_COPY)
 	ether_addr_copy(netdev->dev_addr, addr->sa_data);
 #else
 	eth_hw_addr_set(netdev, addr->sa_data);
@@ -1060,7 +1060,7 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	octep_vf_get_mac_addr(octep_vf_dev, octep_vf_dev->mac_addr);
-#if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
+#if defined(USE_ETHER_ADDR_COPY)
 	ether_addr_copy(netdev->dev_addr, octep_vf_dev->mac_addr);
 	ether_addr_copy(netdev->perm_addr, octep_vf_dev->mac_addr);
 #else
