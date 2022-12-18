@@ -442,6 +442,10 @@ static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 	struct pci_dev *pdev = oct->pdev;
 	int i = 0;
 
+	/* Check for MBOX INTR and OEI INTR */
+	if (octep_poll_non_ioq_interrupts_cn93_pf(oct))
+		goto irq_handled;
+
 	/* Check for IRERR INTR */
 	reg_val = octep_read_csr64(oct, CN93_SDP_EPF_IRERR_RINT);
 	if (reg_val) {
@@ -500,10 +504,6 @@ static irqreturn_t octep_non_ioq_intr_handler_cn93_pf(void *dev)
 		octep_write_csr64(oct, CN93_SDP_EPF_VFORE_RINT(0), reg_val);
 		goto irq_handled;
 	}
-
-	/* Check for MBOX INTR and OEI INTR */
-	if (octep_poll_non_ioq_interrupts_cn93_pf(oct))
-		goto irq_handled;
 
 	/* Check for DMA INTR */
 	reg_val = octep_read_csr64(oct, CN93_SDP_EPF_DMA_RINT);
