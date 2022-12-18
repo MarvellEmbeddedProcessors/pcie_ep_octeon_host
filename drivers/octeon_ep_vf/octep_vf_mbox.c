@@ -18,7 +18,7 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 	if (!oct->mbox)
 		return -1;
 
-	spin_lock_init(&oct->mbox->lock);
+	mutex_init(&oct->mbox->lock);
 
 	oct->hw_ops.setup_mbox_regs(oct, ring);
 	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
@@ -78,31 +78,10 @@ void octep_vf_mbox_work(struct work_struct *work)
 		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_UP;
 }
 
-inline void octep_vf_mbox_set_state(struct octep_vf_mbox *mbox, enum octep_pfvf_mbox_state state)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&mbox->lock, flags);
-	mbox->state = state;
-	spin_unlock_irqrestore(&mbox->lock, flags);
-}
-
-enum octep_pfvf_mbox_state octep_vf_mbox_get_state(struct octep_vf_mbox *mbox)
-{
-	enum octep_pfvf_mbox_state state;
-	unsigned long flags;
-
-	spin_lock_irqsave(&mbox->lock, flags);
-	state = mbox->state;
-	spin_unlock_irqrestore(&mbox->lock, flags);
-	return state;
-}
-
 static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 				    union octep_pfvf_mbox_word cmd,
 				    union octep_pfvf_mbox_word *rsp)
 {
-	long timeout = OCTEP_PFVF_MBOX_WRITE_WAIT_TIME;
 	struct octep_vf_mbox *mbox = oct->mbox;
 	u64 reg_val = 0ull;
 	int count = 0;
@@ -112,15 +91,15 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 
 	cmd.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
 	writeq(cmd.u64, mbox->mbox_write_reg);
-	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_MS; count++) {
-		schedule_timeout_uninterruptible(timeout);
+	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
+		schedule_timeout(msecs_to_jiffies(1));
 		reg_val = readq(mbox->mbox_write_reg);
 		if (reg_val != cmd.u64) {
 			rsp->u64 = reg_val;
 			break;
 		}
 	}
-	if (count == OCTEP_PFVF_MBOX_TIMEOUT_MS) {
+	if (count == OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT) {
 		dev_err(&oct->pdev->dev, "mbox send command timed out\n");
 		return OCTEP_PFVF_MBOX_CMD_STATUS_TIMEDOUT;
 	}
@@ -140,12 +119,10 @@ int octep_vf_mbox_send_cmd(struct octep_vf_device *oct, union octep_pfvf_mbox_wo
 
 	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
-	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY)
-		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
 
-	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_BUSY);
+	mutex_lock(&mbox->lock);
 	ret = __octep_vf_mbox_send_cmd(oct, cmd, rsp);
-	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
+	mutex_unlock(&mbox->lock);
 	return ret;
 }
 
@@ -161,10 +138,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	if (!mbox)
 		return OCTEP_PFVF_MBOX_CMD_STATUS_NOT_SETUP;
 
-	if (octep_vf_mbox_get_state(mbox) == OCTEP_PFVF_MBOX_STATE_BUSY)
-		return OCTEP_PFVF_MBOX_CMD_STATUS_BUSY;
-
-	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_BUSY);
+	mutex_lock(&mbox->lock);
 	cmd.u64 = 0;
 	cmd.s_data.opcode = opcode;
 	cmd.s_data.frag = 0;
@@ -172,7 +146,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	ret = __octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 	if (ret) {
 		dev_err(&oct->pdev->dev, "send mbox cmd fail for data request\n");
-		octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
+		mutex_unlock(&mbox->lock);
 		return ret;
 	}
 	/*  PF sends the data length of requested CMD
@@ -188,7 +162,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 		ret = __octep_vf_mbox_send_cmd(oct, cmd, &rsp);
 		if (ret) {
 			dev_err(&oct->pdev->dev, "send mbox cmd fail for data request\n");
-			octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
+			mutex_unlock(&mbox->lock);
 			mbox->mbox_data.data_index = 0;
 			memset(mbox->mbox_data.recv_data, 0, OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE);
 			return ret;
@@ -214,7 +188,7 @@ int octep_vf_mbox_bulk_read(struct octep_vf_device *oct, enum octep_pfvf_mbox_op
 	*size = tmp_len;
 	mbox->mbox_data.data_index = 0;
 	memset(mbox->mbox_data.recv_data, 0, OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE);
-	octep_vf_mbox_set_state(mbox, OCTEP_PFVF_MBOX_STATE_IDLE);
+	mutex_unlock(&mbox->lock);
 	return 0;
 }
 

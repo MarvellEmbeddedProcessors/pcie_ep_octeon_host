@@ -85,8 +85,8 @@ struct octep_vf_mbox_wk {
 
 /* Octeon device mailbox */
 struct octep_vf_mbox {
-	/* A spinlock to protect access to this q_mbox. */
-	spinlock_t lock;
+	/* A mutex to protect access to this q_mbox. */
+	struct mutex lock;
 
 	u32 state;
 

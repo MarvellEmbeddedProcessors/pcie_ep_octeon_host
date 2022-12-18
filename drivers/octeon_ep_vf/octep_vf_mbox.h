@@ -35,11 +35,6 @@ enum octep_pfvf_mbox_cmd_status {
 	OCTEP_PFVF_MBOX_CMD_STATUS_BUSY = 4
 };
 
-enum octep_pfvf_mbox_state {
-	OCTEP_PFVF_MBOX_STATE_IDLE = 0,
-	OCTEP_PFVF_MBOX_STATE_BUSY = 1,
-};
-
 enum octep_pfvf_link_status {
 	OCTEP_PFVF_LINK_STATUS_DOWN,
 	OCTEP_PFVF_LINK_STATUS_UP,
@@ -66,13 +61,13 @@ enum octep_pfvf_link_autoneg {
 	OCTEP_PFVF_LINK_FIXED,
 };
 
-#define OCTEP_PFVF_MBOX_TIMEOUT_MS     800
+#define OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT  8000
+#define OCTEP_PFVF_MBOX_TIMEOUT_WAIT_UDELAY 1000
 #define OCTEP_PFVF_MBOX_MAX_RETRIES    2
 #define OCTEP_PFVF_MBOX_VERSION        0
 #define OCTEP_PFVF_MBOX_MAX_DATA_SIZE  6
 #define OCTEP_PFVF_MBOX_MAX_DATA_BUF_SIZE 320
 #define OCTEP_PFVF_MBOX_MORE_FRAG_FLAG 1
-#define OCTEP_PFVF_MBOX_WRITE_WAIT_TIME msecs_to_jiffies(1)
 
 union octep_pfvf_mbox_word {
 	u64 u64;
