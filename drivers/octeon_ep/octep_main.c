@@ -959,9 +959,7 @@ static int octep_set_vf_link_state(struct net_device *dev, int vf, int link_stat
 
 static int octep_get_vf_stats(struct net_device *dev, int vf, struct ifla_vf_stats *vf_stats)
 {
-	struct octep_device *oct = netdev_priv(dev);
-
-	dev_err(&oct->pdev->dev, "Getting VF stats not supported\n");
+	printk_once("Octeon: Getting VF stats not supported\n");
 	return 0;
 }
 
