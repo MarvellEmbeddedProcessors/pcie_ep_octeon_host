@@ -336,6 +336,10 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 	if (unlikely(pkt_count > 0xF0000000U)) {
 		writel(pkt_count, oq->pkts_sent_reg);
 		pkt_count = readl(oq->pkts_sent_reg);
+		if (unlikely(pkt_count == 0xFFFFFFFF)) {
+			pkt_count = 0;
+			dev_emerg(oq->dev, "OQ-%u count readback failure\n", oq->q_no);
+		}
 		new_pkts += pkt_count;
 	}
 	oq->last_pkt_count = pkt_count;
