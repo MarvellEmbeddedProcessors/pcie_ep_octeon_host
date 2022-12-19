@@ -286,6 +286,11 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 
 	mutex_lock(&mbox->lock);
 	cmd.u64 = readq(mbox->vf_pf_data_reg);
+	if (unlikely(cmd.u64 == 0xFFFFFFFFFFFFFFFFU)) {
+		mutex_unlock(&mbox->lock);
+		return;
+	}
+
 	rsp.u64 = 0;
 
 	switch (cmd.s.opcode) {

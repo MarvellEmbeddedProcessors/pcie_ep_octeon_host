@@ -74,6 +74,8 @@ void octep_vf_mbox_work(struct work_struct *work)
 	link_info = &oct->link_info;
 	mbox = oct->mbox;
 	pf_vf_data = readq(mbox->mbox_read_reg);
+	if (unlikely(pf_vf_data == 0xFFFFFFFFFFFFFFFFU))
+		return;
 	if (!(pf_vf_data & OCTEP_PFVF_LINK_STATUS_DOWN))
 		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_DOWN;
 	else if (pf_vf_data & OCTEP_PFVF_LINK_STATUS_UP)
@@ -96,6 +98,10 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
 		msleep(1);
 		reg_val = readq(mbox->mbox_write_reg);
+		if (unlikely(reg_val == 0xFFFFFFFFFFFFFFFFU)) {
+			dev_err(&oct->pdev->dev, "mbox send command err\n");
+			return OCTEP_PFVF_MBOX_CMD_STATUS_ERR;
+		}
 		if (reg_val != cmd.u64) {
 			rsp->u64 = reg_val;
 			break;
