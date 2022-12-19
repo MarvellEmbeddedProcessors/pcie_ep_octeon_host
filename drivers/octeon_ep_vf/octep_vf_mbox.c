@@ -92,7 +92,7 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 	cmd.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
 	writeq(cmd.u64, mbox->mbox_write_reg);
 	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
-		schedule_timeout(msecs_to_jiffies(1));
+		msleep(1);
 		reg_val = readq(mbox->mbox_write_reg);
 		if (reg_val != cmd.u64) {
 			rsp->u64 = reg_val;
