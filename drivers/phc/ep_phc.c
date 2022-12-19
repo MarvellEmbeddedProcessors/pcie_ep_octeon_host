@@ -24,7 +24,9 @@
 #include "octeon_hw.h"
 
 
+#ifdef PHC_DEBUG
 static void octeon_device_poll(struct work_struct *work);
+#endif
 
 int startup_set_ptp = 0;
 module_param(startup_set_ptp, int, 0);

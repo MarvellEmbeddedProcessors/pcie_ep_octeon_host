@@ -28,7 +28,7 @@ cavium_parse_cvs_string(const char *cvs_name, char *ver_string, int len)
 	   return the build date */
 	if (strlen(cvs_name_str) < 7 || cvs_name_str[7] == ' ') {
 		cavium_snprintf(version, sizeof(version),
-				"Development Build %s", __DATE__);
+				"Development Build");
 		version[sizeof(version) - 1] = 0;
 		cavium_strncpy(ver_string, len - 1, version, len - 1);
                 ver_string[len - 1] = 0;
