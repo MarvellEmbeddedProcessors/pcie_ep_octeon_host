@@ -1431,12 +1431,13 @@ static int octep_sriov_enable(struct octep_device *oct, int num_vfs)
 	struct pci_dev *pdev = oct->pdev;
 	int err;
 
+	CFG_GET_ACTIVE_VFS(oct->conf) = num_vfs;
 	err = pci_enable_sriov(pdev, num_vfs);
 	if (err) {
 		dev_warn(&pdev->dev, "Failed to enable SRIOV err=%d\n", err);
+		CFG_GET_ACTIVE_VFS(oct->conf) = 0;
 		return err;
 	}
-	CFG_GET_ACTIVE_VFS(oct->conf) = num_vfs;
 
 	return num_vfs;
 }
