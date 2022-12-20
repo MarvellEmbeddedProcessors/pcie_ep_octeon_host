@@ -33,6 +33,8 @@ void octep_vf_delete_mbox(struct octep_vf_device *oct)
 	if (oct->mbox) {
 		if (work_pending(&oct->mbox->wk.work))
 			cancel_work_sync(&oct->mbox->wk.work);
+
+		mutex_destroy(&oct->mbox->lock);
 		vfree(oct->mbox);
 		oct->mbox = NULL;
 		dev_info(&oct->pdev->dev, "Deleted vf mbox successfully\n");

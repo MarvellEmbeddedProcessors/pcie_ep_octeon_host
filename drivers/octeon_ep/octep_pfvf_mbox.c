@@ -195,6 +195,8 @@ void octep_delete_pfvf_mbox(struct octep_device *oct)
 
 		if (work_pending(&oct->mbox[ring]->wk.work))
 			cancel_work_sync(&oct->mbox[ring]->wk.work);
+
+		mutex_destroy(&oct->mbox[ring]->lock);
 		vfree(oct->mbox[ring]);
 		oct->mbox[ring] = NULL;
 	}
