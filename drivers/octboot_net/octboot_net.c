@@ -39,6 +39,7 @@ static struct octboot_net_dev *gmdev;
 static struct pci_dev *octnet_pci_dev;
 static int octboot_net_init_done;
 static void mgmt_init_work(void *bar4_addr);
+static int mdev_reinit_rings(struct octboot_net_dev *mdev);
 static int mgmt_init_start = 0;
 #define OCTBOOT_NET_INIT_WQ_DELAY (1 * HZ)
 #define DEVICE_COUNT_RESOURCE 3
@@ -243,9 +244,8 @@ static void mbox_send_msg(struct octboot_net_dev *mdev, union octboot_net_mbox_m
 
 static void octboot_net_restart(void)
 {
-	cancel_delayed_work_sync(&octboot_net_init_task);
-	flush_workqueue(octboot_net_init_wq);
-	queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task, 0);
+	cancel_delayed_work(&octboot_net_init_task);
+	queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task, OCTBOOT_NET_INIT_WQ_DELAY);
 }
 
 
@@ -257,10 +257,10 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 	mutex_lock(&mdev->mbox_lock);
 	msg->words[0] = readq(TARGET_MBOX_MSG_REG(mdev, 0));
 	if (msg->s.hdr.opcode == OCTBOOT_NET_MBOX_OPCODE_INVALID) {
-		printk("Async or Sync reset\n");
-		ret = -ENOENT;
+		printk("Async or Sync reset of 95N\n");
+		ret = 0;
 		mutex_unlock(&mdev->mbox_lock);
-		// TBD octboot_net_restart();
+		octboot_net_restart();
 		/* Perform cleanup and return to looking for signature */
 		return ret;
 
@@ -286,7 +286,7 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 {
 	union octboot_net_mbox_msg msg;
 
-	printk(KERN_DEBUG "change host status from %lu to %llu \n",
+	printk(KERN_DEBUG "change host status from %llu to %llu \n",
 		readq(HOST_STATUS_REG(mdev)), status);
 	
 	writeq(status, HOST_STATUS_REG(mdev));
@@ -299,7 +299,7 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 
 static void octboot_net_init_work(struct work_struct *work)
 {
-	int i;
+	int i, ret;
 	void *bar4_addr;
 	unsigned long mapped_len = 0;
 	octnet_pci_dev = pci_get_device(vendor_id, device_id, NULL);
@@ -307,6 +307,19 @@ static void octboot_net_init_work(struct work_struct *work)
 		printk("Invalid PCI bus or slot number\n");
 		return;
 	}
+
+	ret = pci_enable_device(octnet_pci_dev);
+	if (ret) {
+		printk(KERN_ERR "Failed to enable F95N device:0x%x\n", ret);
+		return;
+	}
+
+	ret = pci_set_dma_mask(octnet_pci_dev, DMA_BIT_MASK(64));
+	if (ret) {
+		printk(KERN_ERR "Failed to set DMA mask on F95N device:0x%x\n", ret);
+		return;
+	}
+	pci_set_master(octnet_pci_dev);
 
 	for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
 		octboot_net_device.mmio[i].start = pci_resource_start(octnet_pci_dev, i * 2);
@@ -337,7 +350,7 @@ static void octboot_net_poll (void *bar4_addr)
 	signature = octboot_net_device.npu_memmap_info.signature;
 	// Check for signature and 
 	if (signature == NPU_HANDSHAKE_SIGNATURE) {
-		printk("signature found %llx\n, signature");
+		printk("signature found %llu\n", signature);
 	// Uboot is booting and requires a netdevice for tftp 
 	} else {
 		queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task,
@@ -352,6 +365,24 @@ static void octboot_net_poll (void *bar4_addr)
 	if (!mgmt_init_start) {
 		mgmt_init_work(bar4_addr) ;
 		mgmt_init_start = 1;
+	} else if ((mgmt_init_start) && octboot_net_init_done) {
+                struct octboot_net_dev *mdev = gmdev;
+		int ret;
+                /* This is restart */
+		printk(KERN_ERR "This is restart of mgmt service task\n");
+		change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
+		netif_carrier_off(mdev->ndev);
+		napi_synchronize(&mdev->rxq[0].napi);
+		ret = mdev_reinit_rings(mdev);
+		if (ret) {
+		printk(KERN_ERR "restart of mgmt service task failed\n");
+		printk(KERN_ERR "Please unload and load octboot_net module\n");
+			change_host_status(mdev, OCTNET_HOST_FATAL, false);
+			return;
+		}
+		change_host_status(mdev, OCTNET_HOST_READY, false);
+		queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
+		usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 	}
 	return;
 }
@@ -362,7 +393,7 @@ static int octboot_net_open(struct net_device *dev)
 
 	mdev->admin_up = true;
 	__module_get(THIS_MODULE);
-        return 0;
+	return 0;
 }
 
 static int octboot_net_close(struct net_device *dev)
@@ -1101,7 +1132,9 @@ static void octboot_net_task(struct work_struct *work)
 			if (msg.s.hdr.req_ack)
 				set_host_mbox_ack_reg(mdev, msg.s.hdr.id);
 			break;
-
+		case OCTBOOT_NET_MBOX_OPCODE_INVALID:
+			/* Return from octboot_net_task */
+			return;
 		default:
 			break;
 		}
@@ -1206,6 +1239,7 @@ static void mgmt_init_work(void *bar4_addr)
 	queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
 		   usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 	gmdev = mdev;
+	octboot_net_init_done = 1;
 	return;
 destroy_mutex:
 	mutex_destroy(&mdev->mbox_lock);
