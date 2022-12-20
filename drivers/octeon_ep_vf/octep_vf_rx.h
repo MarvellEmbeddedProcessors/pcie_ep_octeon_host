@@ -79,6 +79,9 @@ struct octep_vf_oq_stats {
 
 	/* Number of times failed to allocate buffers. */
 	u64 alloc_failures;
+
+	/* Number of packets for which data arrived late. */
+	u64 pkts_delayed_data;
 };
 
 #define OCTEP_VF_OQ_STATS_SIZE   (sizeof(struct octep_vf_oq_stats))
@@ -187,6 +190,9 @@ struct octep_vf_oq {
 	/* The size of each buffer pointed by the buffer pointer. */
 	u32 buffer_size;
 	u32 max_single_buffer_size;
+
+	/* indicates queue is suspended in case of unexpected/unhandled event */
+	bool suspend;
 
 	/* The 8B aligned descriptor ring starts at this address. */
 	struct octep_vf_oq_desc_hw *desc_ring;
