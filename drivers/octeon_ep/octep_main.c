@@ -1022,11 +1022,9 @@ static void octep_hb_timeout_task(struct work_struct *work)
 		return;
 	}
 
-	dev_err(&oct->pdev->dev, "Missed %u heartbeats. Uninitializing\n",
+	dev_err(&oct->pdev->dev, "Missed %u heartbeats. carrier off\n",
 		miss_cnt);
-	atomic_set(&oct->status, OCTEP_DEV_STATUS_UNINIT);
-	cancel_all_tasks(oct);
-	unregister_netdev(oct->netdev);
+	netif_carrier_off(oct->netdev);
 }
 
 /**

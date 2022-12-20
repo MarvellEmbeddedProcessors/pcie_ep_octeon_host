@@ -96,7 +96,7 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 	cmd.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
 	writeq(cmd.u64, mbox->mbox_write_reg);
 	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
-		msleep(1);
+		udelay(1000);
 		reg_val = readq(mbox->mbox_write_reg);
 		if (unlikely(reg_val == 0xFFFFFFFFFFFFFFFFU)) {
 			dev_err(&oct->pdev->dev, "mbox send command err\n");
