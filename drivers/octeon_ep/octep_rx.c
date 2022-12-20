@@ -345,6 +345,24 @@ static int octep_oq_check_hw_for_pkts(struct octep_device *oct,
 	return new_pkts;
 }
 
+static void octep_oq_dump_state(struct octep_oq *oq)
+{
+	dev_info(oq->dev, "==== OQ[%d] state ====\n", oq->q_no);
+	dev_info(oq->dev,
+		 "OQ[%d]: pkts_pending = %u; last_pkt_count = %u; host_read_idx = %u\n",
+		 oq->q_no, oq->pkts_pending, oq->last_pkt_count, oq->host_read_idx);
+	dev_info(oq->dev,
+		 "OQ[%d]: refill_count = %u; refill_idx = %u; threshold = %u\n",
+		 oq->q_no, oq->refill_count, oq->host_refill_idx, oq->refill_threshold);
+	dev_info(oq->dev,
+		 "OQ[%d]: ring size = %u; buffer_size = %u; max_single__buffer_size = %u\n",
+		 oq->q_no, oq->max_count, oq->buffer_size, oq->max_single_buffer_size);
+	dev_info(oq->dev,
+		 "OQ[%d] stats: pkts = %llu; bytes = %llu; fails = %llu; delayed = %llu\n",
+		 oq->q_no, oq->stats.packets, oq->stats.bytes,
+		 oq->stats.alloc_failures, oq->stats.pkts_delayed_data);
+}
+
 /**
  * __octep_oq_process_rx() - Process hardware Rx queue and push to stack.
  *
@@ -378,6 +396,40 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 			       PAGE_SIZE, DMA_FROM_DEVICE);
 		resp_hw = page_address(buff_info->page);
 		buff_info->page = NULL;
+
+		if(unlikely(*((volatile uint64_t *)&resp_hw->length) == 0)) {
+			int retry = 100;
+
+			dev_dbg(oq->dev,
+				"OQ[%d]: host_read_idx: %d; Data not ready yet, "
+				"Retry; pkt=%u, pkt_count=%u, pending=%u\n",
+				oq->q_no, oq->host_read_idx,
+				pkt, pkts_to_process, oq->pkts_pending);
+			oq->stats.pkts_delayed_data++;
+			while (retry-- && unlikely(*((volatile uint64_t *)&resp_hw->length) == 0))
+				udelay(50);
+			if (unlikely(!resp_hw->length)) {
+				dev_notice(oq->dev,
+					   "OQ[%d]: Data not available for index-%d; "
+					   "pkts_compl=%u, total_to_process=%u, pending=%u\n",
+					   oq->q_no, oq->host_read_idx,
+					   pkt, pkts_to_process, oq->pkts_pending);
+				octep_oq_dump_state(oq);
+
+				/* check if device is not responding */
+				if (readl(oq->pkts_sent_reg) == 0xFFFFFFFF) {
+					dev_err(oq->dev,
+						"OQ[%d]: device not reachable\n", oq->q_no);
+					return pkt;
+				}
+
+				/* Zero length packet encountered; disable the queue and return */
+				oct->hw_ops.disable_oq(oct, oq->q_no);
+				oq->suspend = true;
+				dev_err(oq->dev, "OQ[%d]: suspended\n", oq->q_no);
+				return pkt;
+			}
+		}
 
 		/* Swap the length field that is in Big-Endian to CPU */
 		buff_info->len = be64_to_cpu(resp_hw->length);
