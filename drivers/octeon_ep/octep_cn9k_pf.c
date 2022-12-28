@@ -554,6 +554,13 @@ static irqreturn_t octep_ioq_intr_handler_cn93_pf(void *data)
 	return IRQ_HANDLED;
 }
 
+/* soft reset of 98xx */
+static int octep_soft_reset_cn98_pf(struct octep_device *oct)
+{
+	dev_info(&oct->pdev->dev, "CN98XX: skip soft reset\n");
+	return 0;
+}
+
 /* soft reset of 93xx */
 static int octep_soft_reset_cn93_pf(struct octep_device *oct)
 {
@@ -768,7 +775,10 @@ void octep_device_setup_cn93_pf(struct octep_device *oct)
 
 	oct->hw_ops.non_ioq_intr_handler = octep_non_ioq_intr_handler_cn93_pf;
 	oct->hw_ops.ioq_intr_handler = octep_ioq_intr_handler_cn93_pf;
-	oct->hw_ops.soft_reset = octep_soft_reset_cn93_pf;
+	if (oct->chip_id == OCTEP_PCI_DEVICE_ID_CN98_PF)
+		oct->hw_ops.soft_reset = octep_soft_reset_cn98_pf;
+	else
+		oct->hw_ops.soft_reset = octep_soft_reset_cn93_pf;
 	oct->hw_ops.reinit_regs = octep_reinit_regs_cn93_pf;
 
 	oct->hw_ops.enable_interrupts = octep_enable_interrupts_cn93_pf;
