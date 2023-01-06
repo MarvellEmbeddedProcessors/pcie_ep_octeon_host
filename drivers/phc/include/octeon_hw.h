@@ -9,7 +9,7 @@
 #ifndef __OCTEON_HW_H__
 #define __OCTEON_HW_H__
 
-#include "octeon_main.h"
+#include "linux_sysdep.h"
 #include "octeon_device.h"
 
 static inline uint16_t OCTEON_MAJOR_REV(octeon_device_t * oct)
@@ -26,27 +26,23 @@ static inline uint16_t OCTEON_MINOR_REV(octeon_device_t * oct)
 
 #define   octeon_write_csr(oct_dev, reg_off, value) \
 		{ \
-			cavium_print(PRINT_REGS, "octeon_write_csr: reg: 0x%08lx val: 0x%08lx\n", (unsigned long)reg_off, (unsigned long)value); \
 			OCTEON_WRITE32((uint8_t*)oct_dev->mmio[0].hw_addr + reg_off, value); \
 		}
 
 #define   octeon_write_csr64(oct_dev, reg_off, val64) \
 		{ \
-			cavium_print(PRINT_REGS, "octeon_write_csr64: reg: 0x%08lx val: 0x%016llx\n", (unsigned long)reg_off, (uint64_t)val64); \
 			OCTEON_WRITE64((uint8_t*)oct_dev->mmio[0].hw_addr + reg_off, val64); \
 		}
 
 #define   octeon_read_csr(oct_dev, reg_off)         \
 		({ \
 			uint32_t  val=OCTEON_READ32((uint8_t*)oct_dev->mmio[0].hw_addr + reg_off);\
-			cavium_print(PRINT_REGS, "octeon_read_csr: reg: 0x%08lx val: 0x%08lx\n",(unsigned long) reg_off, (unsigned long)val); \
 			val;\
 		})
 
 #define   octeon_read_csr64(oct_dev, reg_off)         \
 		({ \
 			uint64_t  val64 = OCTEON_READ64((uint8_t*)oct_dev->mmio[0].hw_addr + reg_off);\
-			cavium_print(PRINT_REGS, "octeon_read_csr64: reg: 0x%08lx val: 0x%016llx\n", (unsigned long)reg_off, (uint64_t)val64); \
 		  val64;\
 		})
 
@@ -69,10 +65,6 @@ static inline uint64_t OCTEON_PCI_WIN_READ(octeon_device_t * oct, uint64_t addr)
 	OCTEON_WRITE64(oct->reg_list.pci_win_rd_addr, addr);
 	val64 = OCTEON_READ64(oct->reg_list.pci_win_rd_data);
 
-	cavium_print(PRINT_REGS,
-		     "OCTEON_PCI_WIN_READ: reg: 0x%016llx val: 0x%016llx\n",
-		     addr, val64);
-
 	return val64;
 }
 
@@ -92,14 +84,7 @@ OCTEON_PCI_WIN_WRITE(octeon_device_t * oct, uint64_t addr, uint64_t val)
 	OCTEON_WRITE64(oct->reg_list.pci_win_wr_addr, addr);
 
 	OCTEON_WRITE64(oct->reg_list.pci_win_wr_data, val);
-
-	cavium_print(PRINT_REGS,
-		     "OCTEON_PCI_WIN_WRITE: reg: 0x%016llx val: 0x%016llx\n",
-		     addr, val);
 }
 
-#define   CN3XXX_DEVICE_IN_PCIX_MODE(oct_dev)       \
-      (octeon_read_csr(oct_dev, PCI_CTL_STATUS_2) & PCI_CTL_STATUS_2_PCIX_MODE)
 
 #endif /* __OCTEON_HW_H__ */
-/* $Id: octeon_hw.h 162991 2017-07-20 10:18:44Z mchalla $ */

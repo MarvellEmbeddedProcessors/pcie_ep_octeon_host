@@ -3,13 +3,14 @@
  */
 
 #include "octeon_device.h"
-#include "octeon_macros.h"
-#include "octeon_mem_ops.h"
+#include "octeon_hw.h"
 #include "octeon_compat.h"
-#include "octeon-pci.h"
 
 /* All Octeon devices share the same PHC device ID */
 #define OCTEON_PHC_PCIID_PF		0xef00177d
+
+#define FW_STATUS_READY         1ULL
+#define FW_STATUS_RUNNING	2ULL
 
 octeon_device_t *octeon_device[MAX_OCTEON_DEVICES];
 uint32_t octeon_device_count = 0;
@@ -19,7 +20,7 @@ void octeon_free_device_mem(octeon_device_t *oct_dev)
 	int i;
 
 	i = oct_dev->octeon_id;
-	cavium_free_virt(oct_dev);
+	vfree(oct_dev);
 
 	octeon_device[i] = NULL;
 	octeon_device_count--;
@@ -28,48 +29,20 @@ octeon_device_t* octeon_allocate_device_mem(int pci_id)
 {
 	octeon_device_t *oct_dev;
 	uint8_t *buf = NULL;
-	int octdevsize = 0, configsize = 0, size;
-
-	switch (pci_id) {
-
-
-	case OCTEON_CN93XX_ID_PF:
-	case OCTEON_CN98XX_ID_PF:
-	case OCTEON_CN95O_ID_PF:
-	case OCTEON_CN95N_ID_PF:
-	    case 0xEF00:
-		configsize = sizeof(octeon_cn93xx_pf_t);
-		break;
-
-	case OCTEON_CN10KA_ID_PF:
-	case OCTEON_CNF10KA_ID_PF:
-	case OCTEON_CNF10KB_ID_PF:
-	case OCTEON_CN10KB_ID_PF:
-		configsize = sizeof(octeon_cnxk_pf_t);
-		break;
-
-	default:
-		printk(KERN_ERR "%s: Unknown PCI Device: 0x%x\n", __FUNCTION__,
-				 pci_id);
-		return(NULL);
-	}
-
-	if (configsize & 0x7)
-		configsize += (8 - (configsize & 0x7));
+	int octdevsize = 0, size;
 
 	octdevsize = sizeof(octeon_device_t);
 	if (octdevsize & 0x7)
 		octdevsize += (8 - (octdevsize & 0x7));
 
-	size = octdevsize + configsize;
-	buf = cavium_alloc_virt(size);
+	size = octdevsize;
+	buf = vmalloc(size);
 	if (buf == NULL)
 		return(NULL);
 
-	cavium_memset(buf, 0, size);
+	memset(buf, 0, size);
 
 	oct_dev = (octeon_device_t *)buf;
-	oct_dev->chip = (void *)(buf + octdevsize);
 
 	return(oct_dev);
 }
@@ -111,17 +84,6 @@ out:
 }
 
 
-void cavium_delete_proc(octeon_device_t *oct_dev)
-{
-	struct proc_dir_entry *root =
-		(struct proc_dir_entry *)oct_dev->proc_root_dir;
-	if (!root)
-		return;
-	proc_remove(root);
-
-	return;
-}
-
 void octeon_unmap_pci_barx(octeon_device_t *oct_dev, int baridx)
 {
 	dev_info(&oct_dev->pci_dev->dev,
@@ -139,7 +101,7 @@ void octeon_destroy_resources(octeon_device_t *oct_dev)
 {
 	/* call the App handler to clear and destroy the queues created by the application. */
 
-	switch (cavium_atomic_read(&oct_dev->status)) {
+	switch (atomic_read(&oct_dev->status)) {
 	case OCT_DEV_RUNNING:
 	case OCT_DEV_DROQ_INIT_DONE:
 	case OCT_DEV_INSTR_QUEUE_INIT_DONE:
@@ -149,9 +111,9 @@ void octeon_destroy_resources(octeon_device_t *oct_dev)
 #endif
 
 	case OCT_DEV_CORE_OK:
-		cavium_atomic_set(&oct_dev->status, OCT_DEV_IN_RESET);
+		atomic_set(&oct_dev->status, OCT_DEV_IN_RESET);
 
-		cavium_sleep_timeout(CAVIUM_TICKS_PER_SEC / 10);
+		cavium_sleep_timeout(HZ / 10);
 #if __GNUC__ > 6
 		__attribute__((__fallthrough__));
 #endif
@@ -162,11 +124,6 @@ void octeon_destroy_resources(octeon_device_t *oct_dev)
 #endif
 	case OCT_DEV_HOST_OK:
 
-
-#ifndef PCIE_AER
-		/* Delete the /proc device entries */
-		cavium_delete_proc(oct_dev);
-#endif
 #if __GNUC__ > 6
 		__attribute__((__fallthrough__));
 #endif
@@ -235,91 +192,91 @@ static int cnxk_get_pcie_qlmport(octeon_device_t * oct_dev)
 
 static void cn93xx_setup_reg_address(octeon_device_t *oct_dev)
 {
-	uint8_t cavium_iomem *bar0_pciaddr = oct_dev->mmio[0].hw_addr;
+	uint8_t __iomem *bar0_pciaddr = oct_dev->mmio[0].hw_addr;
 
 	oct_dev->reg_list.pci_win_wr_addr_hi =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_WR_ADDR_HI);
 	oct_dev->reg_list.pci_win_wr_addr_lo =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_WR_ADDR_LO);
 	oct_dev->reg_list.pci_win_wr_addr =
-		(uint64_t cavium_iomem *)(bar0_pciaddr +
+		(uint64_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_WR_ADDR64);
 
 	oct_dev->reg_list.pci_win_rd_addr_hi =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_RD_ADDR_HI);
 	oct_dev->reg_list.pci_win_rd_addr_lo =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_RD_ADDR_LO);
 	oct_dev->reg_list.pci_win_rd_addr =
-		(uint64_t cavium_iomem *)(bar0_pciaddr +
+		(uint64_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_RD_ADDR64);
 
 	oct_dev->reg_list.pci_win_wr_data_hi =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_WR_DATA_HI);
 	oct_dev->reg_list.pci_win_wr_data_lo =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_WR_DATA_LO);
 	oct_dev->reg_list.pci_win_wr_data =
-		(uint64_t cavium_iomem *)(bar0_pciaddr +
+		(uint64_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_WR_DATA64);
 
 	oct_dev->reg_list.pci_win_rd_data_hi =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_RD_DATA_HI);
 	oct_dev->reg_list.pci_win_rd_data_lo =
-		(uint32_t cavium_iomem *)(bar0_pciaddr +
+		(uint32_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_RD_DATA_LO);
 	oct_dev->reg_list.pci_win_rd_data =
-		(uint64_t cavium_iomem *)(bar0_pciaddr +
+		(uint64_t __iomem *)(bar0_pciaddr +
 					  CN93XX_SDP_WIN_RD_DATA64);
 }
 
 static void cnxk_setup_reg_address(octeon_device_t * oct)
 {
-	uint8_t cavium_iomem *bar0_pciaddr = oct->mmio[0].hw_addr;
+	uint8_t __iomem *bar0_pciaddr = oct->mmio[0].hw_addr;
 
 	oct->reg_list.pci_win_wr_addr_hi =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_WR_ADDR_HI);
 	oct->reg_list.pci_win_wr_addr_lo =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_WR_ADDR_LO);
 	oct->reg_list.pci_win_wr_addr =
-	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+	    (uint64_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_WR_ADDR64);
 
 	oct->reg_list.pci_win_rd_addr_hi =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_RD_ADDR_HI);
 	oct->reg_list.pci_win_rd_addr_lo =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_RD_ADDR_LO);
 	oct->reg_list.pci_win_rd_addr =
-	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+	    (uint64_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_RD_ADDR64);
 
 	oct->reg_list.pci_win_wr_data_hi =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_WR_DATA_HI);
 	oct->reg_list.pci_win_wr_data_lo =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_WR_DATA_LO);
 	oct->reg_list.pci_win_wr_data =
-	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+	    (uint64_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_WR_DATA64);
 
 	oct->reg_list.pci_win_rd_data_hi =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_RD_DATA_HI);
 	oct->reg_list.pci_win_rd_data_lo =
-	    (uint32_t cavium_iomem *) (bar0_pciaddr +
+	    (uint32_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_RD_DATA_LO);
 	oct->reg_list.pci_win_rd_data =
-	    (uint64_t cavium_iomem *) (bar0_pciaddr +
+	    (uint64_t __iomem *) (bar0_pciaddr +
 				       CNXK_SDP_WIN_RD_DATA64);
 }
 
@@ -373,8 +330,6 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 {
 	uint32_t dev_id, rev_id;
 	int ret;
-	octeon_cn93xx_pf_t *cn93xx;
-	octeon_cnxk_pf_t *cnxk;
 
 	OCTEON_READ_PCI_CONFIG(oct_dev, 0, &dev_id);
 	OCTEON_READ_PCI_CONFIG(oct_dev, 8, &rev_id);
@@ -402,12 +357,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 				 OCTEON_MINOR_REV(oct_dev));
 		oct_dev->pf_num = oct_dev->octeon_id;
 		/* Enable it to stop loading the driver for PF1 */
-		oct_dev->sriov_info.num_vfs = 0;
 		oct_dev->chip_id = OCTEON_CN93XX_ID_PF;
-
-		cn93xx = (octeon_cn93xx_pf_t *)oct_dev->chip;
-
-		cn93xx->oct = oct_dev;
 
 		if (octeon_map_pci_barx(oct_dev, 0, 0))
 			return(-1);
@@ -446,11 +396,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 				 PCI_SLOT(oct_dev->pci_dev->devfn),
 				 PCI_FUNC(oct_dev->pci_dev->devfn));
 
-		cnxk = (octeon_cnxk_pf_t *) oct_dev->chip;
-		cnxk->oct = oct_dev;
-
 		oct_dev->pf_num = oct_dev->octeon_id;
-		oct_dev->sriov_info.num_vfs = 0;
 		oct_dev->chip_id = OCTEON_CN10KA_ID_PF;
 
 

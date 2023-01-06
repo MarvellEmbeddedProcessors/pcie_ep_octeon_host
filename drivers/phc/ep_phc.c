@@ -19,8 +19,9 @@
 #include <linux/sched/signal.h>
 #include <linux/ptp_clock_kernel.h>
 
-#include "octeon_main.h"
-#include "cavium_release.h"
+#include "linux_sysdep.h"
+#include "octeon_device.h"
+#include "version.h"
 #include "octeon_hw.h"
 
 
@@ -39,7 +40,6 @@ void octeon_pci_bar4_write64(octeon_device_t *oct_dev, int baridx, uint64_t bar_
 
 int octeon_chip_specific_setup(octeon_device_t *oct_dev);
 
-OCTEON_DRIVER_STATUS octeon_state;
 #ifndef  DEFINE_PCI_DEVICE_TABLE
 #define  DEFINE_PCI_DEVICE_TABLE(octeon_ep_phc_pci_tbl) struct pci_device_id octeon_ep_phc_pci_tbl[]
 #endif
@@ -339,7 +339,7 @@ int octeon_device_init(octeon_device_t *oct_dev)
 {
 	int ret;
 
-	cavium_atomic_set(&oct_dev->status, OCT_DEV_BEGIN_STATE);
+	atomic_set(&oct_dev->status, OCT_DEV_BEGIN_STATE);
 
 	/* Enable access to the octeon device and make its DMA capability
 	   known to the OS. */
@@ -355,20 +355,13 @@ int octeon_device_init(octeon_device_t *oct_dev)
 	}
 
 	dev_info(&oct_dev->pci_dev->dev, "Chip specific setup completed\n");
-	cavium_atomic_set(&oct_dev->status, OCT_DEV_PCI_MAP_DONE);
+	atomic_set(&oct_dev->status, OCT_DEV_PCI_MAP_DONE);
 
-	cavium_spin_lock_init(&oct_dev->oct_lock);
+	spin_lock_init(&oct_dev->oct_lock);
 
-	cavium_atomic_set(&oct_dev->status, OCT_DEV_DISPATCH_INIT_DONE);
+	atomic_set(&oct_dev->status, OCT_DEV_DISPATCH_INIT_DONE);
 
-#if 0
-	/* Setup the /proc entries for this octeon device. */
-	cavium_init_proc(oct_dev);
-#endif
-
-	cavium_atomic_set(&oct_dev->status, OCT_DEV_HOST_OK);
-
-	cavium_atomic_set(&oct_dev->hostfw_hs_state, HOSTFW_HS_INIT);
+	atomic_set(&oct_dev->status, OCT_DEV_HOST_OK);
 
 	return 0;
 }
@@ -382,15 +375,15 @@ static void octeon_device_init_work(struct work_struct *work)
 	wq = container_of(work, struct cavium_delayed_wq, wk.work.work);
 	oct_dev = (octeon_device_t *)wq->wk.ctxptr;
 
-	cavium_atomic_set(&oct_dev->status, OCT_DEV_CHECK_FW);
+	atomic_set(&oct_dev->status, OCT_DEV_CHECK_FW);
 	while (true) {
 		status = oct_get_fw_ready_status(oct_dev);
 		if (status == FW_STATUS_READY || status == FW_STATUS_RUNNING)
 			break;
 
 		schedule_timeout_interruptible(HZ * 1);
-		if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING) {
-			cavium_atomic_set(&oct_dev->status, OCT_DEV_STATE_INVALID);
+		if (atomic_read(&oct_dev->status) > OCT_DEV_RUNNING) {
+			atomic_set(&oct_dev->status, OCT_DEV_STATE_INVALID);
 			dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Stopping firmware ready work.\n",
 					 oct_dev->octeon_id);
 			return;
@@ -402,8 +395,6 @@ static void octeon_device_init_work(struct work_struct *work)
 				 oct_dev->octeon_id);
 		return;
 	}
-
-	octeon_state = OCT_DRV_ACTIVE;
 
 	if (OCTEON_CNXK_PF(oct_dev->chip_id) || OCTEON_CNFXK_PF(oct_dev->chip_id)) {
 	    oct_ep_ptp_caps.gettime64 = oct_ep_ptp_gettime_cn10k;
@@ -540,7 +531,7 @@ static void octeon_device_poll(struct work_struct *work)
 				 (long long)(kt - kt1));
 			p_ptp = ptp;
 			p_kt = kt;
-			if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
+			if (atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
 				return;
 		}
 	} else {
@@ -564,7 +555,7 @@ static void octeon_device_poll(struct work_struct *work)
 				 (long long)(kt - kt1));
 			p_ptp = ptp;
 			p_kt = kt;
-			if (cavium_atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
+			if (atomic_read(&oct_dev->status) > OCT_DEV_RUNNING)
 				return;
 		}
 	}
@@ -573,83 +564,89 @@ static void octeon_device_poll(struct work_struct *work)
 
 int octeon_ep_phc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
-    octeon_device_t *oct_dev = NULL;
+	octeon_device_t *oct_dev = NULL;
 
-    oct_dev = octeon_allocate_device(pdev->device);
-    if (oct_dev == NULL)
-	    return -ENOMEM;
+	oct_dev = octeon_allocate_device(pdev->device);
+	if (oct_dev == NULL)
+		return(-ENOMEM);
 
-    oct_dev->oct_ep_ptp_clock = kmalloc(sizeof(struct oct_ep_ptp_clock ), GFP_KERNEL);
-    if (oct_dev->oct_ep_ptp_clock == NULL)
-	return -ENOMEM;
+	oct_dev->oct_ep_ptp_clock = kmalloc(sizeof(struct oct_ep_ptp_clock), GFP_KERNEL);
+	if (oct_dev->oct_ep_ptp_clock == NULL)
+		return(-ENOMEM);
 
 
-    /* Assign octeon_device for this device to the private data area. */
-    pci_set_drvdata(pdev, oct_dev);
+	/* Assign octeon_device for this device to the private data area. */
+	pci_set_drvdata(pdev, oct_dev);
 
-    /* set linux specific device pointer */
-    oct_dev->pci_dev = (void *)pdev;
+	/* set linux specific device pointer */
+	oct_dev->pci_dev = (void *)pdev;
 
-    oct_dev->dev_init_wq.wq = alloc_workqueue("dev_init_wq", WQ_MEM_RECLAIM, 0);
-    oct_dev->dev_init_wq.wk.ctxptr = oct_dev;
-    INIT_DELAYED_WORK(&oct_dev->dev_init_wq.wk.work, octeon_device_init_work);
-    queue_delayed_work(oct_dev->dev_init_wq.wq, &oct_dev->dev_init_wq.wk.work, 0);
 
-    return 0;
+	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC: Loading PHC driver version: %s\n",
+		 SDK_VERSION);
+
+	oct_dev->dev_init_wq.wq = alloc_workqueue("dev_init_wq", WQ_MEM_RECLAIM, 0);
+	oct_dev->dev_init_wq.wk.ctxptr = oct_dev;
+	INIT_DELAYED_WORK(&oct_dev->dev_init_wq.wk.work, octeon_device_init_work);
+	queue_delayed_work(oct_dev->dev_init_wq.wq, &oct_dev->dev_init_wq.wk.work, 0);
+
+	return 0;
 
 }
 void octeon_ep_phc_remove(struct pci_dev *pdev)
 {
-    octeon_device_t *oct_dev = pci_get_drvdata(pdev);
-    int oct_idx;
+	octeon_device_t *oct_dev = pci_get_drvdata(pdev);
+	int oct_idx;
 
-    oct_idx = oct_dev->octeon_id;
+	oct_idx = oct_dev->octeon_id;
 
-    dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Stopping octeon device\n", oct_idx);
-    if (cavium_atomic_read(&oct_dev->status) == OCT_DEV_CHECK_FW) {
-	    cavium_atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
-	    while (true) {
-		    if (cavium_atomic_read(&oct_dev->status) == OCT_DEV_STATE_INVALID)
-			    return;
+	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Stopping octeon device\n", oct_idx);
+	if (atomic_read(&oct_dev->status) == OCT_DEV_CHECK_FW) {
+		atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
+		while (true) {
+			if (atomic_read(&oct_dev->status) == OCT_DEV_STATE_INVALID)
+				return;
 
-		    dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Waiting for firmware ready work to end.\n",
-				 oct_idx);
-		    schedule_timeout_interruptible(HZ * 1);
-	    }
-	    goto before_exit;
-    }
+			dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Waiting for firmware ready work to end.\n",
+				oct_idx);
+			schedule_timeout_interruptible(HZ * 1);
+		}
+		goto before_exit;
+	}
 
-    cavium_atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
+	atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
 
 #ifdef PHC_DEBUG
-    cancel_delayed_work_sync(&oct_dev->dev_poll_wq.wk.work);
-    flush_workqueue(oct_dev->dev_poll_wq.wq);
-    destroy_workqueue(oct_dev->dev_poll_wq.wq);
-    oct_dev->dev_poll_wq.wq = NULL;
+	cancel_delayed_work_sync(&oct_dev->dev_poll_wq.wk.work);
+	flush_workqueue(oct_dev->dev_poll_wq.wq);
+	destroy_workqueue(oct_dev->dev_poll_wq.wq);
+	oct_dev->dev_poll_wq.wq = NULL;
 #endif
-    cancel_delayed_work_sync(&oct_dev->dev_init_wq.wk.work);
-    flush_workqueue(oct_dev->dev_init_wq.wq);
-    destroy_workqueue(oct_dev->dev_init_wq.wq);
-    oct_dev->dev_init_wq.wq = NULL;
+	cancel_delayed_work_sync(&oct_dev->dev_init_wq.wk.work);
+	flush_workqueue(oct_dev->dev_init_wq.wq);
+	destroy_workqueue(oct_dev->dev_init_wq.wq);
+	oct_dev->dev_init_wq.wq = NULL;
 
 
-    ptp_clock_unregister(oct_dev->oct_ep_ptp_clock->ptp_clock);
-    kfree(oct_dev->oct_ep_ptp_clock);
+	ptp_clock_unregister(oct_dev->oct_ep_ptp_clock->ptp_clock);
+	kfree(oct_dev->oct_ep_ptp_clock);
 
 	sysfs_remove_file(&oct_dev->phc_sysfs_kobject, &phc_ptp_attribute.attr);
 	sysfs_remove_file(&oct_dev->phc_sysfs_kobject, &phc_pcie_attribute.attr);
 	kobject_put(&oct_dev->phc_sysfs_kobject);
 
-    /* Reset the octeon device and cleanup all memory allocated for
-       the octeon device by driver. */
-    octeon_destroy_resources(oct_dev);
+	/* Reset the octeon device and cleanup all memory allocated for
+	 * the octeon device by driver.*
+	 */
+	octeon_destroy_resources(oct_dev);
 
-    /* This octeon device has been removed. Update the global
-       data structure to reflect this. Free the device structure. */
-    octeon_free_device_mem(oct_dev);
+	/* This octeon device has been removed. Update the global
+	 * data structure to reflect this. Free the device structure.
+	 */
+	octeon_free_device_mem(oct_dev);
 
 before_exit:
-    dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon device removed\n", oct_idx);
+	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon device removed\n", oct_idx);
 }
 
 
