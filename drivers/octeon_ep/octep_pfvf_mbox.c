@@ -98,20 +98,13 @@ static void octep_pfvf_get_mtu(struct octep_device *oct, u32 vf_id,
 			       union octep_pfvf_mbox_word cmd,
 			       union octep_pfvf_mbox_word *rsp)
 {
-	/* FIXME : The below code will be removed once host
-	 * control mailbox provides API to fetch MTU from target.
+	int max_rx_pktlen = oct->netdev->max_mtu + (ETH_HLEN + ETH_FCS_LEN);
+
+	rsp->s_set_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+	/* FIXME: next step is to get it from per vf_id structure stored in PF.
+	 * Each VF may have different MTU setting
 	 */
-	switch (oct->chip_id) {
-	case OCTEP_PCI_DEVICE_ID_CN93_PF:
-	case OCTEP_PCI_DEVICE_ID_CNF95O_PF:
-	case OCTEP_PCI_DEVICE_ID_CNF95N_PF:
-		rsp->s_get_mtu.mtu = OCTEON_SDP_16K_HW_FRS;
-		break;
-	default:
-		rsp->s_get_mtu.mtu = OCTEON_SDP_64K_HW_FRS;
-		break;
-	}
-	rsp->s_get_mtu.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+	rsp->s_get_mtu.mtu = max_rx_pktlen;
 }
 
 static void octep_pfvf_set_mac_addr(struct octep_device *oct,  u32 vf_id,

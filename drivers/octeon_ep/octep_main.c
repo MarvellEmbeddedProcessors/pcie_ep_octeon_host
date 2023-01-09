@@ -1228,6 +1228,7 @@ static void octep_dev_setup_task(struct work_struct *work)
 	struct octep_device *oct = container_of(work, struct octep_device,
 						dev_setup_task);
 	struct net_device *netdev = oct->netdev;
+	int max_rx_pktlen;
 	u8 status;
 	int err;
 
@@ -1272,8 +1273,16 @@ static void octep_dev_setup_task(struct work_struct *work)
 
 	netdev->hw_features = NETIF_F_SG;
 	netdev->features |= netdev->hw_features;
+
+	max_rx_pktlen = octep_ctrl_net_get_mtu(oct, OCTEP_CTRL_NET_INVALID_VFID);
+	if (max_rx_pktlen < 0) {
+		dev_err(&oct->pdev->dev,
+			"Failed to get max receive packet size; err = %d\n", max_rx_pktlen);
+		atomic_set(&oct->status, OCTEP_DEV_STATUS_INIT);
+		return;
+	}
 	netdev->min_mtu = OCTEP_MIN_MTU;
-	netdev->max_mtu = OCTEP_MAX_MTU;
+	netdev->max_mtu = max_rx_pktlen - (ETH_HLEN + ETH_FCS_LEN);
 	netdev->mtu = OCTEP_DEFAULT_MTU;
 
 	octep_ctrl_net_get_mac_addr(oct, OCTEP_CTRL_NET_INVALID_VFID,
