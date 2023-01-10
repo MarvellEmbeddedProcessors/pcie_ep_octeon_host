@@ -1111,6 +1111,13 @@ int octep_device_setup(struct octep_device *oct)
 		oct->mmio[i].hw_addr =
 			ioremap(pci_resource_start(oct->pdev, i * 2),
 				pci_resource_len(oct->pdev, i * 2));
+		if (!oct->mmio[i].hw_addr) {
+			dev_err(&pdev->dev,
+				"Failed to remap BAR-%d; start=0x%llx len=0x%llx\n",
+				i, pci_resource_start(oct->pdev, i * 2),
+				pci_resource_len(oct->pdev, i * 2));
+			goto ioremap_err;
+		}
 		oct->mmio[i].mapped = 1;
 	}
 
@@ -1165,6 +1172,14 @@ int octep_device_setup(struct octep_device *oct)
 
 	return 0;
 
+ioremap_err:
+	while (i) {
+		i--;
+		iounmap(oct->mmio[i].hw_addr);
+		oct->mmio[i].mapped = 0;
+	}
+	kfree(oct->conf);
+	oct->conf = NULL;
 unsupported_dev:
 	return -1;
 }
