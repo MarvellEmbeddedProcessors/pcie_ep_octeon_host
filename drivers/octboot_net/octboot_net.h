@@ -40,7 +40,7 @@
 static inline uint32_t octboot_net_circq_add(uint32_t index, uint32_t add,
 				       uint32_t mask)
 {
-        return (index + add) & mask;
+	return (index + add) & mask;
 }
 
 static inline uint32_t octboot_net_circq_inc(uint32_t index, uint32_t mask)

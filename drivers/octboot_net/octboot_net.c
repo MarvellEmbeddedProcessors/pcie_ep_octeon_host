@@ -7,6 +7,8 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/netdevice.h>
+#include <linux/ethtool.h>
 #include <linux/sched.h>
 #include <linux/timer.h>
 #include <linux/workqueue.h>
@@ -35,12 +37,18 @@
 
 static struct workqueue_struct *octboot_net_init_wq;
 static struct delayed_work octboot_net_init_task;
-static struct octboot_net_dev *gmdev;
+static struct octboot_net_dev *gmdev[8];
 static struct pci_dev *octnet_pci_dev;
-static int octboot_net_init_done;
-static void mgmt_init_work(void *bar4_addr);
+static struct pci_dev *octnet_pci_dev_arr[8];
+static int octnet_num_device;
+static int octboot_net_init_done[8];
+static int octboot_net_init_task_restart;
+
+static void mgmt_init_work(void *bar4_addr, int index);
 static int mdev_reinit_rings(struct octboot_net_dev *mdev);
-static int mgmt_init_start = 0;
+static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
+			bool ack_wait);
+static int mgmt_init_start[8];
 #define OCTBOOT_NET_INIT_WQ_DELAY (1 * HZ)
 #define DEVICE_COUNT_RESOURCE 3
 
@@ -69,10 +77,10 @@ union octboot_net_mbox_msg {
 	} s;
 } __packed;
 
-static void octboot_net_poll (void *bar4_addr);
+static void octboot_net_poll(void);
 
 struct uboot_pcinet_barmap {
-	uint64_t signature;     
+	uint64_t signature;
 	uint64_t host_version;
 	uint64_t host_status_reg;
 	uint64_t host_mailbox_ack;
@@ -96,6 +104,7 @@ struct uboot_pcinet_barmap {
 struct octboot_net_dev {
 	struct device *dev;
 	struct net_device *ndev;
+	struct pci_dev *pdev;
 	struct octboot_net_sw_descq rxq[OCTBOOT_NET_MAXQ];
 	struct octboot_net_sw_descq txq[OCTBOOT_NET_MAXQ];
 	bool  admin_up;
@@ -115,11 +124,12 @@ struct octboot_net_dev {
 	struct mutex mbox_lock;
 	uint32_t send_mbox_id;
 	uint32_t recv_mbox_id;
+	int      octboot_net_restart;
 	uint8_t hw_addr[ETH_ALEN];
 };
 
 #define NPU_HANDSHAKE_SIGNATURE 0xABCDABCD
-#define SIGNATURE_OFFSET 0x2000000 /* BAR4 index 8 is at this offset */ 
+#define SIGNATURE_OFFSET 0x2000000 /* BAR4 index 8 is at this offset */
 #define HOST_VERSION_OFFSET 0x2000008
 #define HOST_STATUS_REG_OFFSET 0x2000080
 
@@ -138,7 +148,7 @@ struct octboot_net_dev {
 #define HOST_STATUS_REG(mdev)      (mdev->bar_map + HOST_STATUS_REG_OFFSET)
 #define HOST_MBOX_ACK_REG(mdev)    (mdev->bar_map + HOST_MBOX_ACK_OFFSET)
 #define HOST_MBOX_MSG_REG(mdev, i)    \
-        (mdev->bar_map + HOST_MBOX_OFFSET + (i * 8))
+	(mdev->bar_map + HOST_MBOX_OFFSET + (i * 8))
 
 
 #define OCTNET_TARGET_DOWN               0
@@ -182,9 +192,11 @@ typedef struct {
 	octeon_mmio mmio[3];
 	/* struct npu_bar_map npu_memmap_info; */
 	struct uboot_pcinet_barmap npu_memmap_info;
+	void *bar4_addr;
+	int signature_found;
 } octboot_net_device_t;
 
-octboot_net_device_t octboot_net_device;
+octboot_net_device_t octboot_net_device[8];
 
 static unsigned int vendor_id = 0x177d;
 static unsigned int device_id = 0xb400;
@@ -209,7 +221,8 @@ static void set_host_mbox_ack_reg(struct octboot_net_dev *mdev, uint32_t id)
 	writeq(id, HOST_MBOX_ACK_REG(mdev));
 }
 
-static void mbox_send_msg(struct octboot_net_dev *mdev, union octboot_net_mbox_msg *msg)
+static void mbox_send_msg(struct octboot_net_dev *mdev,
+		union octboot_net_mbox_msg *msg)
 {
 	unsigned long timeout = msecs_to_jiffies(OCTBOOT_NET_MBOX_TIMEOUT_MS);
 	unsigned long period = msecs_to_jiffies(OCTBOOT_NET_MBOX_WAIT_MS);
@@ -233,8 +246,8 @@ static void mbox_send_msg(struct octboot_net_dev *mdev, union octboot_net_mbox_m
 		while (get_target_mbox_ack(mdev) != id) {
 			schedule_timeout_interruptible(period);
 			if ((signal_pending(current)) ||
-			    (time_after(jiffies, expire))) {
-				printk(KERN_ERR "octboot_net:mbox ack wait failed\n");
+				(time_after(jiffies, expire))) {
+				netdev_err(mdev->ndev, "octboot_net:mbox ack wait failed\n");
 				break;
 			}
 		}
@@ -245,21 +258,31 @@ static void mbox_send_msg(struct octboot_net_dev *mdev, union octboot_net_mbox_m
 static void octboot_net_restart(void)
 {
 	cancel_delayed_work(&octboot_net_init_task);
-	queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task, OCTBOOT_NET_INIT_WQ_DELAY);
+	queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task,
+			OCTBOOT_NET_INIT_WQ_DELAY);
 }
 
 
 static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
-			       union octboot_net_mbox_msg *msg)
+			union octboot_net_mbox_msg *msg)
 {
 	int i, ret;
+
+	if (!(mdev->ndev->flags|IFF_RUNNING))
+		return 0;
 
 	mutex_lock(&mdev->mbox_lock);
 	msg->words[0] = readq(TARGET_MBOX_MSG_REG(mdev, 0));
 	if (msg->s.hdr.opcode == OCTBOOT_NET_MBOX_OPCODE_INVALID) {
-		printk("Async or Sync reset of 95N\n");
+		netdev_err(mdev->ndev, "Async or Sync reset of 95N\n");
 		ret = 0;
 		mutex_unlock(&mdev->mbox_lock);
+		mdev->octboot_net_restart = true;
+		/* set netdevice down */
+		mdev->ndev->flags &= ~(IFF_RUNNING);
+		change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
+		netif_carrier_off(mdev->ndev);
+		cancel_delayed_work(&mdev->service_task);
 		octboot_net_restart();
 		/* Perform cleanup and return to looking for signature */
 		return ret;
@@ -267,9 +290,9 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 	}
 	if (mdev->recv_mbox_id != msg->s.hdr.id) {
 		/* new msg */
-		printk(KERN_DEBUG "new mbox msg id:%d opcode:%d sizew: %d\n",
-		       msg->s.hdr.id, msg->s.hdr.opcode, msg->s.hdr.sizew);
-	
+		netdev_err(mdev->ndev, "new mbox msg id:%d opcode:%d sizew: %d\n",
+			msg->s.hdr.id, msg->s.hdr.opcode, msg->s.hdr.sizew);
+
 		mdev->recv_mbox_id = msg->s.hdr.id;
 		for (i = 1; i <= msg->s.hdr.sizew; i++)
 			msg->words[i] = readq(TARGET_MBOX_MSG_REG(mdev, i));
@@ -282,13 +305,13 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 }
 
 static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
-			       bool ack_wait)
+			bool ack_wait)
 {
 	union octboot_net_mbox_msg msg;
 
-	printk(KERN_DEBUG "change host status from %llu to %llu \n",
+	netdev_err(mdev->ndev, "change host status from %llu to %llu\n",
 		readq(HOST_STATUS_REG(mdev)), status);
-	
+
 	writeq(status, HOST_STATUS_REG(mdev));
 	memset(&msg, 0, sizeof(union octboot_net_mbox_msg));
 	msg.s.hdr.opcode = OCTBOOT_NET_MBOX_HOST_STATUS_CHANGE;
@@ -300,91 +323,129 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 static void octboot_net_init_work(struct work_struct *work)
 {
 	int i, ret;
-	void *bar4_addr;
 	unsigned long mapped_len = 0;
-	octnet_pci_dev = pci_get_device(vendor_id, device_id, NULL);
-	if (octnet_pci_dev == NULL) {
-		printk("Invalid PCI bus or slot number\n");
-		return;
+
+	octnet_pci_dev = NULL;
+	octnet_num_device = 0;
+
+	//octnet_pci_dev = pci_get_device(vendor_id, device_id, NULL);
+	while ((octnet_pci_dev = pci_get_device(vendor_id, device_id,
+					octnet_pci_dev))) {
+		if (octnet_pci_dev == NULL) {
+			pr_err("Invalid PCI bus or slot number\n");
+			return;
+		}
+		octnet_pci_dev_arr[octnet_num_device] = octnet_pci_dev;
+
+		if (!pci_is_enabled(octnet_pci_dev)) {
+			ret = pci_enable_device(octnet_pci_dev);
+			if (ret) {
+				pr_err("Failed to enable F95N device 0x%x\n", ret);
+				return;
+			}
+
+			ret = pci_set_dma_mask(octnet_pci_dev, DMA_BIT_MASK(64));
+			if (ret) {
+				pr_err("Failed to set DMA mask on F95N device 0x%x\n", ret);
+				return;
+			}
+			pci_set_master(octnet_pci_dev);
+		}
+
+		for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
+			octboot_net_device[octnet_num_device].mmio[i].start =
+				pci_resource_start(octnet_pci_dev, i * 2);
+			octboot_net_device[octnet_num_device].mmio[i].len =
+				pci_resource_len(octnet_pci_dev, i * 2);
+			mapped_len =
+			octboot_net_device[octnet_num_device].mmio[i].len;
+			octboot_net_device[octnet_num_device].mmio[i].hw_addr =
+			ioremap(octboot_net_device[octnet_num_device].mmio[i].start,
+			mapped_len);
+			octboot_net_device[octnet_num_device].mmio[i].done = 1;
+
+			if (i == 2) {
+				octboot_net_device[octnet_num_device].bar4_addr
+				= octboot_net_device[octnet_num_device].mmio[i].hw_addr;
+			}
+		}
+		octnet_num_device++;
 	}
 
-	ret = pci_enable_device(octnet_pci_dev);
-	if (ret) {
-		printk(KERN_ERR "Failed to enable F95N device:0x%x\n", ret);
-		return;
-	}
-
-	ret = pci_set_dma_mask(octnet_pci_dev, DMA_BIT_MASK(64));
-	if (ret) {
-		printk(KERN_ERR "Failed to set DMA mask on F95N device:0x%x\n", ret);
-		return;
-	}
-	pci_set_master(octnet_pci_dev);
-
-	for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
-		octboot_net_device.mmio[i].start = pci_resource_start(octnet_pci_dev, i * 2);
-		octboot_net_device.mmio[i].len = pci_resource_len(octnet_pci_dev, i * 2);
-		mapped_len = octboot_net_device.mmio[i].len;
-		octboot_net_device.mmio[i].hw_addr =  ioremap(
-				octboot_net_device.mmio[i].start, mapped_len);
-		octboot_net_device.mmio[i].done = 1;
-
-	if (i == 2) 
-		bar4_addr = octboot_net_device.mmio[i].hw_addr;
-	}
-
-	octboot_net_poll(bar4_addr);
+	octboot_net_poll();
 	return;
 }
 
-static void octboot_net_poll (void *bar4_addr) 
+static void octboot_net_poll(void)
 {
 	int offset = SIGNATURE_OFFSET; /* BAR4 index 8 is at this offset */
 	uint64_t signature;
 	void *src;
+	void *bar4_addr;
+	int i;
 
-	src = bar4_addr + offset;  
+	for (i = 0; i < octnet_num_device; i++) {
+		bar4_addr = octboot_net_device[i].bar4_addr;
+		src = bar4_addr + offset;
 
-	memcpy(&octboot_net_device.npu_memmap_info, src, 
+		memcpy(&octboot_net_device[i].npu_memmap_info, src,
 			sizeof(struct uboot_pcinet_barmap));
-	signature = octboot_net_device.npu_memmap_info.signature;
-	// Check for signature and 
+	signature = octboot_net_device[i].npu_memmap_info.signature;
+	// Check for signature and
 	if (signature == NPU_HANDSHAKE_SIGNATURE) {
-		printk("signature found %llu\n", signature);
-	// Uboot is booting and requires a netdevice for tftp 
-	} else {
-		queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task,
-			       	OCTBOOT_NET_INIT_WQ_DELAY);
-		return;
+		pr_info("signature found %llu\n", signature);
+		octboot_net_device[i].signature_found = true;
+	// Uboot is booting and requires a netdevice for tftp
+	} else
+		octboot_net_device[i].signature_found = false;
 	}
 	
 	/* Now that we have the signature, the next step is to create a
-	 * netdevice 
+	 * netdevice
 	 * */
 
-	if (!mgmt_init_start) {
-		mgmt_init_work(bar4_addr) ;
-		mgmt_init_start = 1;
-	} else if ((mgmt_init_start) && octboot_net_init_done) {
-                struct octboot_net_dev *mdev = gmdev;
-		int ret;
-                /* This is restart */
-		printk(KERN_ERR "This is restart of mgmt service task\n");
-		change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
-		netif_carrier_off(mdev->ndev);
-		napi_synchronize(&mdev->rxq[0].napi);
-		ret = mdev_reinit_rings(mdev);
-		if (ret) {
-		printk(KERN_ERR "restart of mgmt service task failed\n");
-		printk(KERN_ERR "Please unload and load octboot_net module\n");
-			change_host_status(mdev, OCTNET_HOST_FATAL, false);
+	for (i = 0; i < octnet_num_device; i++) {
+		if ((octboot_net_device[i].signature_found == true) &&
+						!mgmt_init_start[i]) {
+			bar4_addr = octboot_net_device[i].bar4_addr;
+			mgmt_init_work(bar4_addr, i);
+			mgmt_init_start[i] = 1;
+		}
+		if ((octboot_net_device[i].signature_found == true) &&
+			(mgmt_init_start[i]) &&
+			octboot_net_init_done[i]) {
+				struct octboot_net_dev *mdev = gmdev[i];
+				int ret;
+		/* This is restart */
+		if (mdev->octboot_net_restart == true) {
+			netdev_err(mdev->ndev, "This is restart of mgmt service task\n");
+			change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
+			netif_carrier_off(mdev->ndev);
+			napi_synchronize(&mdev->rxq[0].napi);
+			ret = mdev_reinit_rings(mdev);
+			if (ret) {
+				netdev_err(mdev->ndev, "restart of mgmt service task failed\n");
+				netdev_err(mdev->ndev, "Please unload and load octboot_net module\n");
+				change_host_status(mdev, OCTNET_HOST_FATAL, false);
+				return;
+			}
+			change_host_status(mdev, OCTNET_HOST_READY, false);
+			mdev->ndev->flags |= IFF_RUNNING;
+			queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
+			usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
+		}
+		}
+	}
+
+	for (i = 0; i < octnet_num_device; i++) {
+		if (octboot_net_device[i].signature_found == false) {
+			octboot_net_init_task_restart = true;
+			queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task,
+				OCTBOOT_NET_INIT_WQ_DELAY);
 			return;
 		}
-		change_host_status(mdev, OCTNET_HOST_READY, false);
-		queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
-		usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 	}
-	return;
+
 }
 
 static int octboot_net_open(struct net_device *dev)
@@ -439,7 +500,7 @@ static int octboot_net_set_mac(struct net_device *netdev, void *p)
 
 netdev_tx_t octboot_net_tx(struct sk_buff *skb, struct net_device *dev)
 {
-	struct octboot_net_dev *mdev = 
+	struct octboot_net_dev *mdev =
 		(struct octboot_net_dev *)netdev_priv(dev);
 	struct octboot_net_hw_desc_ptr ptr;
 	struct octboot_net_sw_descq  *tq;
@@ -489,7 +550,7 @@ netdev_tx_t octboot_net_tx(struct sk_buff *skb, struct net_device *dev)
 	dma = dma_map_single(mdev->dev, skb->data, skb->len,
 			     DMA_TO_DEVICE);
 	if (dma_mapping_error(mdev->dev, dma)) {
-		printk(KERN_ERR "dma mapping err in xmit\n");
+		netdev_err(mdev->ndev, "dma mapping err in xmit\n");
 		goto err;
 	}
 	ptr.ptr = dma;
@@ -596,7 +657,7 @@ static int rxq_refill(struct octboot_net_dev *mdev, int q_idx, int count)
 		memset(&ptr, 0, sizeof(struct octboot_net_hw_desc_ptr));
 		skb = dev_alloc_skb(OCTBOOT_NET_RX_BUF_SIZE);
 		if (!skb) {
-			printk(KERN_ERR "mgmt_net: skb alloc fail\n");
+			netdev_err(mdev->ndev, "mgmt_net: skb alloc fail\n");
 			break;
 		}
 		skb->dev = mdev->ndev;
@@ -604,14 +665,14 @@ static int rxq_refill(struct octboot_net_dev *mdev, int q_idx, int count)
 				OCTBOOT_NET_RX_BUF_SIZE, DMA_FROM_DEVICE);
 		if (dma_mapping_error(mdev->dev, dma)) {
 			dev_kfree_skb_any(skb);
-			printk(KERN_ERR "mgmt_net: dma mapping fail\n");
+			netdev_err(mdev->ndev, "mgmt_net: dma mapping fail\n");
 			break;
 		}
 		ptr.hdr.s_mgmt_net.ptr_type = OCTBOOT_NET_DESC_PTR_DIRECT;
 		ptr.ptr = dma;
 		if (rq->skb_list[start] != NULL || rq->dma_list[start] != 0) {
 			dev_kfree_skb_any(skb);
-			printk(KERN_ERR "mgmt_net:refill err entry !empty\n");
+			netdev_err(mdev->ndev, "mgmt_net:refill err entry !empty\n");
 			break;
 		}
 		rq->skb_list[start] = skb;
@@ -636,15 +697,15 @@ static void dump_hw_descq(struct octboot_net_hw_descq *descq)
 	struct  octboot_net_hw_desc_ptr *ptr;
 	int i, count;
 
-	printk(KERN_DEBUG "prod_idx %u\n", descq->prod_idx);
-	printk(KERN_DEBUG "cons_idx %u\n", descq->cons_idx);
-	printk(KERN_DEBUG "num_entries %u\n", descq->num_entries);
-	printk(KERN_DEBUG "shadow_cons_idx_addr 0x%llx\n",
+	pr_info("prod_idx %u\n", descq->prod_idx);
+	pr_info("cons_idx %u\n", descq->cons_idx);
+	pr_info("num_entries %u\n", descq->num_entries);
+	pr_info("shadow_cons_idx_addr 0x%llx\n",
 		descq->shadow_cons_idx_addr);
 	count = octboot_net_circq_depth(descq->prod_idx, descq->cons_idx, descq->num_entries - 1);
 	for (i = 0; i < count; i++) {
 		ptr = &descq->desc_arr[i];
-		printk(KERN_DEBUG "idx:%d is_frag:%d total_len:%d ptr_type:%d ptr_len:%d ptr:0x%llx\n", i,
+		pr_info("idx:%d is_frag:%d total_len:%d ptr_type:%d ptr_len:%d ptr:0x%llx\n", i,
 			ptr->hdr.s_mgmt_net.is_frag,
 			ptr->hdr.s_mgmt_net.total_len,
 			ptr->hdr.s_mgmt_net.ptr_type,
@@ -688,10 +749,10 @@ static bool __handle_rxq(struct octboot_net_dev *mdev, int q_idx, int budget, in
 				 DMA_FROM_DEVICE);
 		hw_desc_ptr = rq->hw_descq +
 				OCTBOOT_NET_DESC_ARR_ENTRY_OFFSET(start);
-		/* this is not optimal metatadata should probaly be in the packet */
+		/* this is not optimal metadata should probaly be in the packet */
 		mmio_memread(&ptr, hw_desc_ptr,
 			     sizeof(struct octboot_net_hw_desc_ptr));
-	
+
 		if (unlikely(ptr.hdr.s_mgmt_net.total_len < ETH_ZLEN ||
 		    ptr.hdr.s_mgmt_net.is_frag ||
 		    ptr.hdr.s_mgmt_net.ptr_len != ptr.hdr.s_mgmt_net.ptr_len)) {
@@ -702,7 +763,7 @@ static bool __handle_rxq(struct octboot_net_dev *mdev, int q_idx, int budget, in
 					  sizeof(struct octboot_net_hw_desc_ptr));
 			tmp_descq = kmalloc(descq_tot_size, GFP_KERNEL);
 			if (!tmp_descq) {
-				printk(KERN_ERR "rx error kmalloc\n");
+				netdev_err(mdev->ndev, "rx error kmalloc\n");
 			} else {
 				mmio_memread(tmp_descq, rq->hw_descq,
 					     descq_tot_size);
@@ -735,7 +796,7 @@ static bool __handle_rxq(struct octboot_net_dev *mdev, int q_idx, int budget, in
 		cons_idx = READ_ONCE(rq->local_cons_idx);
 		prod_idx = READ_ONCE(*rq->cons_idx_shadow);
 		count = octboot_net_circq_depth(prod_idx,  cons_idx, rq->mask);
-		if (count) 
+		if (count)
 			resched = true;
 	}
 	return resched;
@@ -753,7 +814,7 @@ static int octboot_net_napi_poll(struct napi_struct *napi, int budget)
 	mdev = (struct octboot_net_dev *)rq->priv;
 	q_num = rq->q_num;
 	tq = &mdev->txq[q_num];
-	
+
 	spin_lock_bh(&tq->lock);
 	need_resched |= __handle_txq_completion(mdev, q_num, budget);
 	spin_unlock_bh(&tq->lock);
@@ -766,7 +827,7 @@ static int octboot_net_napi_poll(struct napi_struct *napi, int budget)
 		return budget;
 	napi_complete(napi);
 	wmb();
-	return 0; 
+	return 0;
 }
 
 static int mdev_clean_tx_ring(struct octboot_net_dev *mdev, int q_idx)
@@ -825,7 +886,7 @@ static int mdev_setup_tx_ring(struct octboot_net_dev *mdev, int q_idx)
 		sizeof(struct octboot_net_hw_desc_ptr));
 	descq = kzalloc(descq_tot_size, GFP_KERNEL);
 	if (!descq) {
-		printk(KERN_ERR "octboot_net: tq descq alloc failed\n");
+		netdev_err(mdev->ndev, "octboot_net: tq descq alloc failed\n");
 		return -ENOMEM;
 	}
 	tq = &mdev->txq[q_idx];
@@ -847,14 +908,14 @@ static int mdev_setup_tx_ring(struct octboot_net_dev *mdev, int q_idx)
 	tq->skb_list = vzalloc(sizeof(struct sk_buff *) * element_count);
 	if (!tq->skb_list) {
 		kfree(descq);
-		printk(KERN_ERR "octboot_net: tq skb_list alloc  failed\n");
+		netdev_err(mdev->ndev, "octboot_net: tq skb_list alloc  failed\n");
 		return -ENOMEM;
 	}
 	tq->dma_list = vzalloc(sizeof(dma_addr_t) * element_count);
 	if (!tq->dma_list) {
 		kfree(descq);
 		vfree(tq->skb_list);
-		printk(KERN_ERR "octboot_net: tq dma_list malloc failed\n");
+		netdev_err(mdev->ndev, "octboot_net: tq dma_list malloc failed\n");
 		return -ENOMEM;
 	}
 	spin_lock_init(&tq->lock);
@@ -878,7 +939,7 @@ static int mdev_setup_tx_rings(struct octboot_net_dev *mdev)
 	}
 	return 0;
 error:
-	for ( j = 0; j < i; j++)
+	for (j = 0; j < i; j++)
 	mdev_clean_tx_ring(mdev, j);
 	return ret;
 }
@@ -949,7 +1010,7 @@ static int mdev_setup_rx_ring(struct octboot_net_dev *mdev, int q_idx)
 		      sizeof(struct octboot_net_hw_desc_ptr));
 	descq = kzalloc(descq_tot_size, GFP_KERNEL);
 	if (!descq) {
-		printk(KERN_ERR "octboot_net: rq descq alloc failed\n");
+		netdev_err(mdev->ndev, "octboot_net: rq descq alloc failed\n");
 		return -ENOMEM;
 	}
 	rq->local_prod_idx = 0;
@@ -960,7 +1021,7 @@ static int mdev_setup_rx_ring(struct octboot_net_dev *mdev, int q_idx)
 	rq->skb_list = vzalloc(sizeof(struct sk_buff *) * element_count);
 	if (!rq->skb_list) {
 		kfree(descq);
-		printk(KERN_ERR "octboot_net: rq skb_list  alloc failed\n");
+		netdev_err(mdev->ndev, "octboot_net: rq skb_list  alloc failed\n");
 		return -ENOMEM;
 	}
 
@@ -968,21 +1029,21 @@ static int mdev_setup_rx_ring(struct octboot_net_dev *mdev, int q_idx)
 	if (!rq->dma_list) {
 		kfree(descq);
 		vfree(rq->skb_list);
-		printk(KERN_ERR "octboot_net: rq dma_list  alloc failed\n");
+		netdev_err(mdev->ndev, "octboot_net: rq dma_list  alloc failed\n");
 		return -ENOMEM;
 	}
 	descq->num_entries = element_count;
 	descq->buf_size = OCTBOOT_NET_RX_BUF_SIZE;
 	rq->cons_idx_shadow = mdev->rq_cons_shdw_vaddr + q_idx;
 	descq->shadow_cons_idx_addr = mdev->rq_cons_shdw_dma +
-		        (q_idx * sizeof(*rq->cons_idx_shadow));
+		(q_idx * sizeof(*rq->cons_idx_shadow));
 	*rq->cons_idx_shadow = 0;
 	count = octboot_net_circq_space(rq->local_prod_idx, rq->local_cons_idx,
 		  rq->mask);
 	for (i = 0; i < count; i++) {
 		skb = alloc_skb(OCTBOOT_NET_RX_BUF_SIZE, GFP_KERNEL);
 		if (!skb) {
-		printk(KERN_ERR "octboot_net: skb alloc failed\n");
+		netdev_err(mdev->ndev, "octboot_net: skb alloc failed\n");
 		ret = -ENOMEM;
 		goto error;
 	}
@@ -990,7 +1051,7 @@ static int mdev_setup_rx_ring(struct octboot_net_dev *mdev, int q_idx)
 	dma = dma_map_single(mdev->dev, skb->data, OCTBOOT_NET_RX_BUF_SIZE,
 		     DMA_FROM_DEVICE);
 	if (dma_mapping_error(mdev->dev, dma)) {
-		printk(KERN_ERR "octboot_net: dma mapping failed\n");
+		netdev_err(mdev->ndev, "octboot_net: dma mapping failed\n");
 		dev_kfree_skb_any(skb);
 		ret = -ENOENT;
 		goto error;
@@ -1010,7 +1071,7 @@ static int mdev_setup_rx_ring(struct octboot_net_dev *mdev, int q_idx)
 	rq->hw_prod_idx = (uint32_t *)(rq->hw_descq +
 		       offsetof(struct octboot_net_hw_descq, prod_idx));
 	netif_napi_add(mdev->ndev, &rq->napi, octboot_net_napi_poll,
-		          NAPI_POLL_WEIGHT);
+			NAPI_POLL_WEIGHT);
 	napi_enable(&mdev->rxq[0].napi);
 	rq->status = OCTBOOT_NET_DESCQ_READY;
 	/* rq needs to be updated before memwrite */
@@ -1050,7 +1111,7 @@ static int mdev_setup_rx_rings(struct octboot_net_dev *mdev)
 	}
 	return 0;
 error:
-	for ( j = 0; j < i; j++)
+	for (j = 0; j < i; j++)
 		mdev_clean_rx_ring(mdev, j);
 	return ret;
 }
@@ -1078,13 +1139,13 @@ static int handle_target_status(struct octboot_net_dev *mdev)
 
 	cur_status = get_host_status(mdev);
 	target_status = get_target_status(mdev);
-	printk(KERN_DEBUG "host status %llu\n", cur_status);
-	printk(KERN_DEBUG "target status %llu\n", target_status);
+	netdev_err(mdev->ndev, "host status %llu\n", cur_status);
+	netdev_err(mdev->ndev, "target status %llu\n", target_status);
 
 	switch (cur_status) {
 	case OCTNET_HOST_READY:
 		if (target_status == OCTNET_TARGET_RUNNING) {
-			printk(KERN_DEBUG "octboot_net: target running\n");
+			netdev_err(mdev->ndev, "octboot_net: target running\n");
 			change_host_status(mdev, OCTNET_HOST_RUNNING, false);
 			netif_carrier_on(mdev->ndev);
 		}
@@ -1092,7 +1153,7 @@ static int handle_target_status(struct octboot_net_dev *mdev)
 	case OCTNET_HOST_RUNNING:
 		target_status = get_target_status(mdev);
 		if (target_status != OCTNET_TARGET_RUNNING) {
-			printk(KERN_DEBUG "octboot_net: target stopped\n");
+			netdev_err(mdev->ndev, "octboot_net: target stopped\n");
 			change_host_status(mdev, OCTNET_HOST_GOING_DOWN,
 						   false);
 			netif_carrier_off(mdev->ndev);
@@ -1107,7 +1168,7 @@ static int handle_target_status(struct octboot_net_dev *mdev)
 		}
 		break;
 	default:
-		printk(KERN_ERR "octboot_net: unhandled state transition host_status:%llu target_status %llu\n",
+		netdev_err(mdev->ndev, "octboot_net: unhandled state transition host_status:%llu target_status %llu\n",
 		       cur_status, target_status);
 		break;
 	}
@@ -1122,11 +1183,11 @@ static void octboot_net_task(struct work_struct *work)
 	int ret;
 	int q_num = 0;
 
-	mdev = (struct octboot_net_dev *)container_of(delayed_work, 
+	mdev = (struct octboot_net_dev *)container_of(delayed_work,
 			struct octboot_net_dev, service_task);
 	ret = mbox_check_msg_rcvd(mdev, &msg);
 	if (!ret) {
-		switch(msg.s.hdr.opcode) {
+		switch (msg.s.hdr.opcode) {
 		case OCTBOOT_NET_MBOX_TARGET_STATUS_CHANGE:
 			handle_target_status(mdev);
 			if (msg.s.hdr.req_ack)
@@ -1153,42 +1214,66 @@ static void octboot_net_task(struct work_struct *work)
 		usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 }
 
-static void mgmt_init_work(void *bar4_addr)
+static void octboot_net_get_drvinfo(struct net_device *dev,
+			struct ethtool_drvinfo *info)
+{
+	struct octboot_net_dev *mdev =
+		(struct octboot_net_dev *)netdev_priv(dev);
+
+	strscpy(info->driver, "OCTBOOT_NET", sizeof(info->driver));
+	strscpy(info->bus_info, pci_name(mdev->pdev), sizeof(info->bus_info));
+}
+
+static const struct ethtool_ops octboot_net_ethtool_ops = {
+	.get_drvinfo = octboot_net_get_drvinfo,
+	.get_link = ethtool_op_get_link,
+};
+
+void octboot_net_set_ethtool_ops(struct net_device *netdev)
+{
+	netdev->ethtool_ops = &octboot_net_ethtool_ops;
+}
+
+static void mgmt_init_work(void *bar4_addr, int index)
 {
 	uint32_t *tq_cons_shdw_vaddr, *rq_cons_shdw_vaddr;
 	dma_addr_t tq_cons_shdw_dma, rq_cons_shdw_dma;
 	int num_txq, num_rxq, max_rxq, max_txq, ret;
 	struct net_device *ndev;
 	struct octboot_net_dev *mdev;
+	struct pci_dev *octnet_pci_device;
+
+	octnet_pci_device = octnet_pci_dev_arr[index];
 
 	max_txq = num_txq = OCTBOOT_NET_MAXQ;
 	max_rxq = num_rxq = OCTBOOT_NET_MAXQ;
-	tq_cons_shdw_vaddr = dma_alloc_coherent(&octnet_pci_dev->dev,
+	tq_cons_shdw_vaddr = dma_alloc_coherent(&octnet_pci_device->dev,
 		(sizeof(uint32_t) * num_txq),
 		&tq_cons_shdw_dma, GFP_KERNEL);
 	if (tq_cons_shdw_vaddr == NULL) {
-		printk(KERN_ERR "octboot_net: dma_alloc_coherent tq failed\n");
+		pr_err("octboot_net: dma_alloc_coherent tq failed\n");
 		ret = -ENOMEM;
 		goto conf_err;
 	}
 
-	rq_cons_shdw_vaddr = dma_alloc_coherent(&octnet_pci_dev->dev,
+	rq_cons_shdw_vaddr = dma_alloc_coherent(&octnet_pci_device->dev,
 		(sizeof(uint32_t) * num_rxq), &rq_cons_shdw_dma, GFP_KERNEL);
 	if (rq_cons_shdw_vaddr == NULL) {
 		ret = -ENOMEM;
-		printk(KERN_ERR "octboot_net: dma_alloc_coherent rq failed\n");
+		pr_err("octboot_net: dma_alloc_coherent rq failed\n");
 		goto tq_dma_free;
 	}
 	/* we support only single queue at this time */
-	ndev = alloc_netdev(sizeof(struct octboot_net_dev), OCTBOOT_IFACE_NAME,
-		    NET_NAME_UNKNOWN, ether_setup);
+	ndev = alloc_netdev(sizeof(struct octboot_net_dev),
+			OCTBOOT_IFACE_NAME, index, ether_setup);
 
 	if (!ndev) {
 		ret = -ENOMEM;
-		printk(KERN_ERR "octboot_net: alloc_netdev failed\n");
+		pr_err("octboot_net: alloc_netdev failed\n");
 		goto rq_dma_free;
 	}
 	ndev->netdev_ops = &octboot_netdev_ops;
+	octboot_net_set_ethtool_ops(ndev);
 	ndev->hw_features = NETIF_F_HIGHDMA;
 	ndev->features = ndev->hw_features;
 	ndev->mtu = OCTBOOT_NET_MAX_MTU;
@@ -1198,8 +1283,9 @@ static void mgmt_init_work(void *bar4_addr)
 	memset(mdev, 0, sizeof(struct octboot_net_dev));
 	mdev->admin_up = false;
 	mdev->ndev = ndev;
+	mdev->pdev = octnet_pci_device;
 	mdev->bar_map = bar4_addr;
-	mdev->dev = &octnet_pci_dev->dev;
+	mdev->dev = &octnet_pci_device->dev;
 	mdev->max_txq = max_txq;
 	mdev->max_rxq = max_rxq;
 	mdev->num_txq = num_txq;
@@ -1211,19 +1297,19 @@ static void mgmt_init_work(void *bar4_addr)
 	mdev->rq_cons_shdw_dma   = rq_cons_shdw_dma;
 	ret = mdev_setup_tx_rings(mdev);
 	if (ret) {
-		printk(KERN_ERR "octboot_net setup tx rings failed\n");
+		netdev_err(mdev->ndev, "octboot_net setup tx rings failed\n");
 		goto free_net;
 	}
 	ret = mdev_setup_rx_rings(mdev);
 	if (ret) {
-		printk(KERN_ERR "octboot_net: setup rx rings failed\n");
+		netdev_err(mdev->ndev, "octboot_net: setup rx rings failed\n");
 		goto clean_tx_ring;
 	}
 
 	mdev->mgmt_wq = alloc_ordered_workqueue("octboot_net_task", 0);
 	if (!mdev->mgmt_wq) {
 		ret = -ENOMEM;
-		printk(KERN_ERR "octboot_net_task: alloc_ordered_workqueue failed\n");
+		netdev_err(mdev->ndev, "octboot_net_task: alloc_ordered_workqueue failed\n");
 		goto clean_rx_ring;
 	}
 	mdev->send_mbox_id = 0;
@@ -1231,15 +1317,15 @@ static void mgmt_init_work(void *bar4_addr)
 	mutex_init(&mdev->mbox_lock);
 	ret = register_netdev(ndev);
 	if (ret) {
-		printk(KERN_ERR "octboot_net: register_netdev failed\n");
+		netdev_err(mdev->ndev, "octboot_net: register_netdev failed\n");
 		goto destroy_mutex;
 	}
 	change_host_status(mdev, OCTNET_HOST_READY, false);
 	INIT_DELAYED_WORK(&mdev->service_task, octboot_net_task);
 	queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
 		   usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
-	gmdev = mdev;
-	octboot_net_init_done = 1;
+	gmdev[index] = mdev;
+	octboot_net_init_done[index] = 1;
 	return;
 destroy_mutex:
 	mutex_destroy(&mdev->mbox_lock);
@@ -1252,17 +1338,17 @@ free_net:
 	free_netdev(ndev);
 
 rq_dma_free:
-	dma_free_coherent(&octnet_pci_dev->dev,
+	dma_free_coherent(&octnet_pci_device->dev,
 		  (sizeof(uint32_t) * num_rxq),
 		  rq_cons_shdw_vaddr,
 		  rq_cons_shdw_dma);
 tq_dma_free:
-	dma_free_coherent(&octnet_pci_dev->dev,
+	dma_free_coherent(&octnet_pci_device->dev,
 		  (sizeof(uint32_t) * num_txq),
 		  tq_cons_shdw_vaddr,
 		  tq_cons_shdw_dma);
 conf_err:
-	printk(KERN_ERR "octboot_net: init failed; error = %d\n", ret);
+	pr_err("octboot_net: init failed; error = %d\n", ret);
 	return;
 }
 
@@ -1292,14 +1378,16 @@ static void teardown_mdev_resources(struct octboot_net_dev *mdev)
 static void __exit octboot_net_exit(void)
 {
 	struct octboot_net_dev *mdev;
+	int i;
 
 	cancel_delayed_work_sync(&octboot_net_init_task);
 	flush_workqueue(octboot_net_init_wq);
 	destroy_workqueue(octboot_net_init_wq);
 
-	if (!gmdev)
-		return;
-	mdev = gmdev;
+	for (i = 0; i < octnet_num_device; i++) {
+		if (!gmdev[i])
+			continue;
+	mdev = gmdev[i];
 	netif_carrier_off(mdev->ndev);
 	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, true);
 	napi_synchronize(&mdev->rxq[0].napi);
@@ -1312,7 +1400,8 @@ static void __exit octboot_net_exit(void)
 	unregister_netdev(mdev->ndev);
 	teardown_mdev_resources(mdev);
 	free_netdev(mdev->ndev);
-	gmdev = NULL;
+	gmdev[i] = NULL;
+	}
 }
 
 module_init(octboot_net_init);
