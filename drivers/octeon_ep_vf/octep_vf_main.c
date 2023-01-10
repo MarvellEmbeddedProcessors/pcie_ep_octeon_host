@@ -906,6 +906,13 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 	/* Map BAR region 0 */
 	oct->mmio.hw_addr = ioremap(pci_resource_start(oct->pdev, 0),
 				    pci_resource_len(oct->pdev, 0));
+	if (!oct->mmio.hw_addr) {
+		dev_err(&pdev->dev,
+			"Failed to remap BAR0; start=0x%llx len=0x%llx\n",
+			pci_resource_start(oct->pdev, 0),
+			pci_resource_len(oct->pdev, 0));
+		goto ioremap_err;
+	}
 	oct->mmio.mapped = 1;
 
 	oct->chip_id = pdev->device;
@@ -941,6 +948,7 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 
 unsupported_dev:
 	iounmap(oct->mmio.hw_addr);
+ioremap_err:
 	kfree(oct->conf);
 	return -EOPNOTSUPP;
 }
