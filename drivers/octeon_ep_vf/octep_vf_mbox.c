@@ -343,3 +343,14 @@ int octep_vf_mbox_get_link_status(struct octep_vf_device *oct, u8 *oper_up)
 	*oper_up = rsp.s_link_status.status;
 	return 0;
 }
+
+int octep_vf_mbox_dev_remove(struct octep_vf_device *oct)
+{
+	union octep_pfvf_mbox_word cmd;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s.opcode = OCTEP_PFVF_MBOX_CMD_DEV_REMOVE;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, NULL);
+	return ret;
+}

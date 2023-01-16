@@ -19,6 +19,8 @@ enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_SET_RX_STATE,
 	OCTEP_PFVF_MBOX_CMD_SET_LINK_STATUS,
 	OCTEP_PFVF_MBOX_CMD_GET_LINK_STATUS,
+	OCTEP_PFVF_MBOX_CMD_GET_MTU,
+	OCTEP_PFVF_MBOX_CMD_DEV_REMOVE,
 	OCTEP_PFVF_MBOX_CMD_LAST,
 };
 
@@ -130,4 +132,5 @@ int octep_vf_mbox_version_check(struct octep_vf_device *oct);
 int octep_vf_mbox_set_rx_state(struct octep_vf_device *oct, bool state);
 int octep_vf_mbox_set_link_status(struct octep_vf_device *oct, bool status);
 int octep_vf_mbox_get_link_status(struct octep_vf_device *oct, u8 *oper_up);
+int octep_vf_mbox_dev_remove(struct octep_vf_device *oct);
 #endif

@@ -1134,6 +1134,7 @@ static void octep_vf_remove(struct pci_dev *pdev)
 	if (!oct)
 		return;
 
+	octep_vf_mbox_dev_remove(oct);
 	cancel_work_sync(&oct->tx_timeout_task);
 	netdev = oct->netdev;
 	if (netdev->reg_state == NETREG_REGISTERED)
