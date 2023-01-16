@@ -137,6 +137,22 @@ static void octep_pfvf_get_mac_addr(struct octep_device *oct,  u32 vf_id,
 	rsp->s_set_mac.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
+static void octep_pfvf_dev_remove(struct octep_device *oct,  u32 vf_id,
+				    union octep_pfvf_mbox_word cmd,
+				    union octep_pfvf_mbox_word *rsp)
+{
+	int err;
+
+	err = octep_ctrl_net_dev_remove(oct, vf_id);
+	if (err) {
+		rsp->s.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;
+		dev_err(&oct->pdev->dev, "Failed to acknowledge fw of vf %d removal\n",
+			vf_id);
+		return;
+	}
+	rsp->s.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
+}
+
 int octep_setup_pfvf_mbox(struct octep_device *oct)
 {
 	int i = 0, num_vfs = 0, rings_per_vf = 0;
@@ -314,6 +330,9 @@ void octep_pfvf_mbox_work(struct work_struct *work)
 		break;
 	case OCTEP_PFVF_MBOX_CMD_GET_MTU:
 		octep_pfvf_get_mtu(oct, vf_id, cmd, &rsp);
+		break;
+	case OCTEP_PFVF_MBOX_CMD_DEV_REMOVE:
+		octep_pfvf_dev_remove(oct, vf_id, cmd, &rsp);
 		break;
 	default:
 		dev_err(&oct->pdev->dev, "PF-VF mailbox: invalid opcode %d\n", cmd.s.opcode);
