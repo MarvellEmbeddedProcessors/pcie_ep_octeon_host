@@ -78,6 +78,8 @@ struct octep_hw_ops {
 	void (*setup_oq_regs)(struct octep_device *oct, int q);
 	void (*setup_mbox_regs)(struct octep_device *oct, int mbox);
 
+	irqreturn_t (*mbox_intr_handler)(void *ioq_vector);
+	irqreturn_t (*oei_intr_handler)(void *ioq_vector);
 	irqreturn_t (*non_ioq_intr_handler)(void *ioq_vector);
 	irqreturn_t (*ioq_intr_handler)(void *ioq_vector);
 	int (*soft_reset)(struct octep_device *oct);
@@ -86,7 +88,7 @@ struct octep_hw_ops {
 
 	void (*enable_interrupts)(struct octep_device *oct);
 	void (*disable_interrupts)(struct octep_device *oct);
-	int (*poll_non_ioq_interrupts)(struct octep_device *oct);
+	void (*poll_non_ioq_interrupts)(struct octep_device *oct);
 
 	void (*enable_io_queues)(struct octep_device *oct);
 	void (*disable_io_queues)(struct octep_device *oct);

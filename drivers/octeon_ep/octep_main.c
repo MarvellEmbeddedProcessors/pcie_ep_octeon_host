@@ -173,6 +173,36 @@ static void octep_disable_msix(struct octep_device *oct)
  *
  * this is common handler for all non-queue (generic) interrupts.
  */
+static irqreturn_t octep_mbox_intr_handler(int irq, void *data)
+{
+	struct octep_device *oct = data;
+
+	return oct->hw_ops.mbox_intr_handler(oct);
+}
+
+/**
+ * octep_non_ioq_intr_handler() - common handler for all generic interrupts.
+ *
+ * @irq: Interrupt number.
+ * @data: interrupt data.
+ *
+ * this is common handler for all non-queue (generic) interrupts.
+ */
+static irqreturn_t octep_oei_intr_handler(int irq, void *data)
+{
+	struct octep_device *oct = data;
+
+	return oct->hw_ops.oei_intr_handler(oct);
+}
+
+/**
+ * octep_non_ioq_intr_handler() - common handler for all generic interrupts.
+ *
+ * @irq: Interrupt number.
+ * @data: interrupt data.
+ *
+ * this is common handler for all non-queue (generic) interrupts.
+ */
 static irqreturn_t octep_non_ioq_intr_handler(int irq, void *data)
 {
 	struct octep_device *oct = data;
@@ -233,9 +263,20 @@ static int octep_request_irqs(struct octep_device *oct)
 
 		snprintf(irq_name, OCTEP_MSIX_NAME_SIZE,
 			 "%s-%s", netdev->name, non_ioq_msix_names[i]);
-		ret = request_irq(msix_entry->vector,
-				  octep_non_ioq_intr_handler, 0,
-				  irq_name, oct);
+		if (!strncmp(non_ioq_msix_names[i], "epf_mbox_rint", strlen("epf_mbox_rint"))) {
+			ret = request_irq(msix_entry->vector,
+					  octep_mbox_intr_handler, 0,
+					  irq_name, oct);
+		} else if (!strncmp(non_ioq_msix_names[i], "epf_oei_rint", strlen("epf_oei_rint"))) {
+			ret = request_irq(msix_entry->vector,
+					  octep_oei_intr_handler, 0,
+					  irq_name, oct);
+		} else {
+			ret = request_irq(msix_entry->vector,
+					  octep_non_ioq_intr_handler, 0,
+					  irq_name, oct);
+		}
+
 		if (ret) {
 			netdev_err(netdev,
 				   "request_irq failed for %s; err=%d",

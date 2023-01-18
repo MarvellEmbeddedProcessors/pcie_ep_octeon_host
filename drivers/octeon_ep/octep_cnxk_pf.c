@@ -397,11 +397,7 @@ static void octep_setup_mbox_regs_cnxk_pf(struct octep_device *oct, int q_no)
 
 }
 
-/* Process non-ioq interrupts required to keep pf interface running.
- * OEI_RINT is needed for control mailbox
- * MBOX_RINT is needed for pfvf mailbox
- */
-static int octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
+static void octep_poll_pfvf_mailbox_cnxk_pf(struct octep_device *oct)
 {
 	u32 vf, active_vfs, active_rings_per_vf, vf_mbox_queue;
 	u64 reg0;
@@ -409,12 +405,6 @@ static int octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
 
 	reg0 = octep_read_csr64(oct, CNXK_SDP_EPF_MBOX_RINT(0));
 	if (reg0) {
-
-		/*
-		 * dev_info(&oct->pdev->dev, "Received MBOX_RINT intr: reg0 0x%llx\n",
-		 * reg0);
-		 */
-
 		active_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
 		active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
 		for (vf = 0; vf < active_vfs; vf++) {
@@ -433,6 +423,21 @@ static int octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
 
 		handled = 1;
 	}
+}
+
+static irqreturn_t octep_pfvf_mbox_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+
+	octep_poll_pfvf_mailbox_cnxk_pf(oct);
+	return IRQ_HANDLED;
+}
+
+static void octep_poll_oei_cnxk_pf(struct octep_device *oct)
+{
+	u64 reg0;
+	int handled = 0;
+
 	/* Check for OEI INTR */
 	reg0 = octep_read_csr64(oct, CNXK_SDP_EPF_OEI_RINT);
 	if (reg0) {
@@ -445,7 +450,24 @@ static int octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
 		handled = 1;
 	}
 
-	return handled;
+}
+
+static irqreturn_t octep_oei_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+
+	octep_poll_oei_cnxk_pf(oct);
+	return IRQ_HANDLED;
+}
+
+/* Process non-ioq interrupts required to keep pf interface running.
+ * OEI_RINT is needed for control mailbox
+ * MBOX_RINT is needed for pfvf mailbox
+ */
+static void octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
+{
+	octep_poll_pfvf_mailbox_cnxk_pf(oct);
+	octep_poll_oei_cnxk_pf(oct);
 }
 
 /* Interrupts handler for all non-queue generic interrupts. */
@@ -455,10 +477,6 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 	u64 reg_val = 0;
 	struct pci_dev *pdev = oct->pdev;
 	int i = 0;
-
-	/* Check for MBOX INTR and OEI INTR */
-	if (octep_poll_non_ioq_interrupts_cnxk_pf(oct))
-		goto irq_handled;
 
 	/* Check for IRERR INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_IRERR_RINT);
@@ -790,6 +808,8 @@ void octep_device_setup_cnxk_pf(struct octep_device *oct)
 	oct->hw_ops.setup_oq_regs = octep_setup_oq_regs_cnxk_pf;
 	oct->hw_ops.setup_mbox_regs = octep_setup_mbox_regs_cnxk_pf;
 
+	oct->hw_ops.mbox_intr_handler = octep_pfvf_mbox_intr_handler_cnxk_pf;
+	oct->hw_ops.oei_intr_handler = octep_oei_intr_handler_cnxk_pf;
 	oct->hw_ops.non_ioq_intr_handler = octep_non_ioq_intr_handler_cnxk_pf;
 	oct->hw_ops.ioq_intr_handler = octep_ioq_intr_handler_cnxk_pf;
 	oct->hw_ops.soft_reset = octep_soft_reset_cnxk_pf;
