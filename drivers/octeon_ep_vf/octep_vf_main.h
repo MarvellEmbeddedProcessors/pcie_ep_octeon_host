@@ -194,6 +194,12 @@ struct octep_vf_iface_rxtx_stats {
 	struct octep_vf_iface_tx_stats iface_tx_stats;
 };
 
+/* Device state */
+enum octep_vf_dev_state {
+	OCTEP_VF_DEV_STATE_OPEN,
+	OCTEP_VF_DEV_STATE_READ_STATS,
+};
+
 /* The Octeon device specific private data structure.
  * Each Octeon device has this structure to represent all its components.
  */
@@ -264,6 +270,9 @@ struct octep_vf_device {
 
 	/* offset for iface stats */
 	u32 ctrl_mbox_ifstats_offset;
+
+	/* Device state */
+	unsigned long state;
 };
 
 static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)

@@ -539,6 +539,7 @@ static int octep_open(struct net_device *netdev)
 	if (ret)
 		octep_link_up(netdev);
 
+	set_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
 	return 0;
 
 set_queues_err:
@@ -551,6 +552,11 @@ setup_oq_err:
 	octep_free_iqs(oct);
 setup_iq_err:
 	return -1;
+}
+
+static bool octep_drv_busy(struct octep_device *oct)
+{
+	return test_bit(OCTEP_DEV_STATE_READ_STATS, &oct->state);
 }
 
 /**
@@ -566,6 +572,11 @@ static int octep_stop(struct net_device *netdev)
 	struct octep_device *oct = netdev_priv(netdev);
 
 	netdev_info(netdev, "Stopping the device ...\n");
+
+	clear_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
+	smp_mb__after_atomic();
+	while (octep_drv_busy(oct))
+		msleep(20);
 
 	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
 				       false);
@@ -771,6 +782,13 @@ static void octep_get_stats64(struct net_device *netdev,
 	struct octep_device *oct = netdev_priv(netdev);
 	int q;
 
+	set_bit(OCTEP_DEV_STATE_READ_STATS, &oct->state);
+	smp_mb__after_atomic();
+	if (!test_bit(OCTEP_DEV_STATE_OPEN, &oct->state)) {
+		clear_bit(OCTEP_DEV_STATE_READ_STATS, &oct->state);
+		return;
+	}
+
 	tx_packets = 0;
 	tx_bytes = 0;
 	rx_packets = 0;
@@ -788,6 +806,7 @@ static void octep_get_stats64(struct net_device *netdev,
 	stats->tx_bytes = tx_bytes;
 	stats->rx_packets = rx_packets;
 	stats->rx_bytes = rx_bytes;
+	clear_bit(OCTEP_DEV_STATE_READ_STATS, &oct->state);
 }
 
 /**
@@ -1374,6 +1393,8 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	INIT_WORK(&octep_dev->dev_setup_task, octep_dev_setup_task);
 	schedule_work(&octep_dev->dev_setup_task);
 	dev_info(&pdev->dev, "Device setup task queued\n");
+
+	clear_bit(OCTEP_DEV_STATE_OPEN, &octep_dev->state);
 
 	return 0;
 
