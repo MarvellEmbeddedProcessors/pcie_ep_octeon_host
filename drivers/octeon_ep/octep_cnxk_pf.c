@@ -272,7 +272,7 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 		link = PCI_DEVFN(PCI_SLOT(oct->pdev->devfn), link);
 	}
 	conf->ctrl_mbox_cfg.barmem_addr = (void __iomem *)oct->mmio[2].hw_addr +
-					   (0x400000ull * 8) +
+					   CNXK_PEM_BAR4_INDEX_OFFSET +
 					   (link * CTRL_MBOX_SZ);
 
 	conf->fw_info.hb_interval = OCTEP_DEFAULT_FW_HB_INTERVAL;
