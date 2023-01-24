@@ -33,7 +33,9 @@
 #include "octboot_net.h"
 #include "mmio_api.h"
 
-#define OCTBOOT_NET_VERSION "1.0.0"
+#define OCTBOOT_NET_VERSION "1.0"
+#define OCTBOOT_NET_VERSION_MAJOR 1
+#define OCTBOOT_NET_VERSION_MINOR 0
 
 static struct workqueue_struct *octboot_net_init_wq;
 static struct delayed_work octboot_net_init_task;
@@ -146,6 +148,7 @@ struct octboot_net_dev {
 
 
 #define HOST_STATUS_REG(mdev)      (mdev->bar_map + HOST_STATUS_REG_OFFSET)
+#define HOST_VERSION_REG(mdev)      (mdev->bar_map + HOST_VERSION_OFFSET)
 #define HOST_MBOX_ACK_REG(mdev)    (mdev->bar_map + HOST_MBOX_ACK_OFFSET)
 #define HOST_MBOX_MSG_REG(mdev, i)    \
 	(mdev->bar_map + HOST_MBOX_OFFSET + (i * 8))
@@ -170,6 +173,7 @@ struct octboot_net_dev {
 #define RX_DESCQ_OFFSET(mdev)     (mdev->bar_map + OCTNET_RX_DESCQ_OFFSET)
 
 #define TARGET_STATUS_REG(mdev)        (mdev->bar_map + TARGET_STATUS_REG_OFFSET)
+#define TARGET_VERSION_REG(mdev)        (mdev->bar_map + TARGET_VERSION_OFFSET)
 #define TARGET_MBOX_MSG_REG(mdev, i)  \
 	(mdev->bar_map + TARGET_MBOX_OFFSET + (i * 8))
 #define TARGET_MBOX_ACK_REG(mdev)    \
@@ -209,6 +213,11 @@ static uint64_t get_host_status(struct octboot_net_dev *mdev)
 static uint64_t get_target_status(struct octboot_net_dev *mdev)
 {
 	return readq(TARGET_STATUS_REG(mdev));
+}
+
+static uint64_t get_target_version(struct octboot_net_dev *mdev)
+{
+	return readq(TARGET_VERSION_REG(mdev));
 }
 
 static uint64_t get_target_mbox_ack(struct octboot_net_dev *mdev)
@@ -1242,6 +1251,8 @@ static void mgmt_init_work(void *bar4_addr, int index)
 	struct net_device *ndev;
 	struct octboot_net_dev *mdev;
 	struct pci_dev *octnet_pci_device;
+	uint32_t host_version;
+	uint32_t target_version;
 
 	octnet_pci_device = octnet_pci_dev_arr[index];
 
@@ -1326,6 +1337,14 @@ static void mgmt_init_work(void *bar4_addr, int index)
 		   usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 	gmdev[index] = mdev;
 	octboot_net_init_done[index] = 1;
+	host_version = ((OCTBOOT_NET_VERSION_MAJOR << 8)|OCTBOOT_NET_VERSION_MINOR);
+	writeq(host_version, HOST_VERSION_REG(mdev));
+	target_version = get_target_version(mdev);
+	if ((host_version >> 8) == (target_version >> 8))
+		netdev_info(mdev->ndev, "octboot_net driver compatible with uboot\n");
+	else
+		netdev_err(mdev->ndev, "octboot_net driver Incompatible with uboot\n");
+
 	return;
 destroy_mutex:
 	mutex_destroy(&mdev->mbox_lock);
@@ -1389,12 +1408,12 @@ static void __exit octboot_net_exit(void)
 			continue;
 	mdev = gmdev[i];
 	netif_carrier_off(mdev->ndev);
-	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, true);
+	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
 	napi_synchronize(&mdev->rxq[0].napi);
 	cancel_delayed_work_sync(&mdev->service_task);
 	mdev_clean_rx_rings(mdev);
 	mdev_clean_tx_rings(mdev);
-	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, true);
+	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
 	mutex_destroy(&mdev->mbox_lock);
 	destroy_workqueue(mdev->mgmt_wq);
 	unregister_netdev(mdev->ndev);
