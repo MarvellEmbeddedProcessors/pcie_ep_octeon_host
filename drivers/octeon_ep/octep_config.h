@@ -190,10 +190,25 @@ struct octep_ctrl_mbox_config {
 struct octep_fw_info {
 	/* interface pkind */
 	u16 pkind;
+
 	/* heartbeat interval in milliseconds */
 	u16 hb_interval;
+
 	/* heartbeat miss count */
 	u16 hb_miss_count;
+
+	/* reserved */
+	u16 reserved1;
+
+	/* supported offloads */
+	u64 offloads[2];
+
+	/* supported features */
+	u64 features[2];
+
+	/* reserved */
+	u64 reserved2[3];
+
 };
 
 /* Data Structure to hold configuration limits and active config */
