@@ -18,20 +18,10 @@
 #include <linux/sched/signal.h>
 #endif
 
-#if defined(RHEL_RELEASE_CODE)
-#if  (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,4))
-#define HAS_2PARAM_ACCESS_OK
-#define NO_HAS_MMIOWB
-#define HAS_MULTI_TXQUEUE
-#define HAS_SELECT_QUEUE_FALLBACK
-#define NO_HAS_XMIT_MORE
-#define HAS_SKB_FRAG_OFF
-#endif
-#endif
-
 #include "desc_queue.h"
 #include "octboot_net.h"
 #include "mmio_api.h"
+#include "octboot_net_compat.h"
 
 #define OCTBOOT_NET_VERSION "1.0"
 #define OCTBOOT_NET_VERSION_MAJOR 1
@@ -536,7 +526,7 @@ netdev_tx_t octboot_net_tx(struct sk_buff *skb, struct net_device *dev)
 	}
 	bytes = skb->len;
 
-#if defined(NO_HAS_XMIT_MORE) || LINUX_VERSION_CODE >= KERNEL_VERSION(5,2,0)
+#if defined(NO_SKB_XMIT_MORE)
 	xmit_more = netdev_xmit_more();
 #else
 	xmit_more = skb->xmit_more;
@@ -1079,8 +1069,12 @@ static int mdev_setup_rx_ring(struct octboot_net_dev *mdev, int q_idx)
 	rq->hw_descq = RX_DESCQ_OFFSET(mdev) + (q_idx * descq_tot_size);
 	rq->hw_prod_idx = (uint32_t *)(rq->hw_descq +
 		       offsetof(struct octboot_net_hw_descq, prod_idx));
+#if NAPI_ADD_HAS_BUDGET_ARG
 	netif_napi_add(mdev->ndev, &rq->napi, octboot_net_napi_poll,
 			NAPI_POLL_WEIGHT);
+#else
+	netif_napi_add(mdev->ndev, &rq->napi, octboot_net_napi_poll);
+#endif
 	napi_enable(&mdev->rxq[0].napi);
 	rq->status = OCTBOOT_NET_DESCQ_READY;
 	/* rq needs to be updated before memwrite */
