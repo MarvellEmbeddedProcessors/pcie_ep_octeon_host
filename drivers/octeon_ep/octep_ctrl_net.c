@@ -14,6 +14,18 @@
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
 
+/* Control plane version */
+#define OCTEP_CP_VERSION_MAJOR		1
+#define OCTEP_CP_VERSION_MINOR		0
+#define OCTEP_CP_VERSION_VARIANT	0
+
+#define OCTEP_CP_VERSION(a, b, c)	(((a & 0xff) << 16) + \
+					 ((b & 0xff) << 8) + \
+					 (c & 0xff))
+#define OCTEP_CP_VERSION_CURRENT	(OCTEP_CP_VERSION(OCTEP_CP_VERSION_MAJOR, \
+							  OCTEP_CP_VERSION_MINOR, \
+							  OCTEP_CP_VERSION_VARIANT))
+
 static const u32 req_hdr_sz = sizeof(union octep_ctrl_net_req_hdr);
 static const u32 mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
 static const u32 mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
@@ -73,6 +85,15 @@ static int send_mbox_req(struct octep_device *oct,
 	return 0;
 }
 
+static int validate_fw_version(struct octep_ctrl_mbox *ctrl_mbox)
+{
+	if (ctrl_mbox->version < ctrl_mbox->min_fw_version ||
+	    ctrl_mbox->version > ctrl_mbox->max_fw_version)
+		return -EINVAL;
+
+	return 0;
+}
+
 int octep_ctrl_net_init(struct octep_device *oct)
 {
 	struct pci_dev *pdev = oct->pdev;
@@ -84,11 +105,22 @@ int octep_ctrl_net_init(struct octep_device *oct)
 
 	/* Initialize control mbox */
 	ctrl_mbox = &oct->ctrl_mbox;
+	ctrl_mbox->version = OCTEP_CP_VERSION_CURRENT;
 	ctrl_mbox->barmem = CFG_GET_CTRL_MBOX_MEM_ADDR(oct->conf);
 	ret = octep_ctrl_mbox_init(ctrl_mbox);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to initialize control mbox\n");
 		return ret;
+	}
+
+	dev_info(&pdev->dev, "Control plane versions host: %llx, firmware: %x:%x\n",
+		 ctrl_mbox->version, ctrl_mbox->min_fw_version,
+		 ctrl_mbox->max_fw_version);
+	ret = validate_fw_version(ctrl_mbox);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "Control plane version mismatch\n");
+		octep_ctrl_mbox_uninit(ctrl_mbox);
+		return -EINVAL;
 	}
 	oct->ctrl_mbox_ifstats_offset = ctrl_mbox->barmem_sz;
 
