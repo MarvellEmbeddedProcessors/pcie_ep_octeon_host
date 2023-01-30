@@ -13,7 +13,11 @@
 #if defined(RHEL_RELEASE_CODE)
 #if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,4))
 #define TX_TIMEOUT_HAS_TXQ_ARG 1
+#if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9,2))
+#define NAPI_ADD_HAS_BUDGET_ARG 0
+#else
 #define NAPI_ADD_HAS_BUDGET_ARG 1
+#endif
 #define USE_ETHER_ADDR_COPY
 #else
 #error "RHEL versions before rhel-8.4 not supported !!!"
