@@ -27,7 +27,7 @@ static void octep_pfvf_validate_version(struct octep_device *oct,  u32 vf_id,
 {
 	u32 vf_version = (u32)cmd.s_version.version;
 
-	if (vf_version <= OCTEP_PF_MBOX_VERSION)
+	if (vf_version <= OCTEP_PFVF_MBOX_VERSION_V1)
 		rsp->s_version.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 	else
 		rsp->s_version.type = OCTEP_PFVF_MBOX_TYPE_RSP_NACK;

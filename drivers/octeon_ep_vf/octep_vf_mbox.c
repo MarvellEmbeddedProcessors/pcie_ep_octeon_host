@@ -57,7 +57,8 @@ int octep_vf_mbox_version_check(struct octep_vf_device *oct)
 		dev_err(&oct->pdev->dev,
 			"VF Mbox version:%llu is not compatible with PF\n",
 			(u64)cmd.s_version.version);
-		dev_err(&oct->pdev->dev, "Upgrade driver to compatibale version\n");
+		dev_err(&oct->pdev->dev,
+			"Unload VF driver and load compatibale VF driver version\n");
 	}
 	return ret;
 }
