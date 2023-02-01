@@ -19,11 +19,15 @@
 #define NAPI_ADD_HAS_BUDGET_ARG 1
 #endif
 #define USE_ETHER_ADDR_COPY
+#define NO_SKB_XMIT_MORE
 #else
 #error "RHEL versions before rhel-8.4 not supported !!!"
 #endif
 
 #else
+#if KERNEL_VERSION(5, 2, 0) <= LINUX_VERSION_CODE
+#define NO_SKB_XMIT_MORE
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
 #define TX_TIMEOUT_HAS_TXQ_ARG 1
 #else

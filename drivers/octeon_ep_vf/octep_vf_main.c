@@ -618,6 +618,7 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 	struct octep_vf_iq *iq;
 	skb_frag_t *frag;
 	u16 nr_frags, si;
+	int xmit_more;
 	u16 q_no, wi;
 
 	if (skb_put_padto(skb, ETH_ZLEN))
@@ -694,20 +695,31 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 		hw_desc->dptr = tx_buffer->sglist_dma;
 	}
 
-	/* Flush the hw descriptor before writing to doorbell */
-	wmb();
-
 	netdev_tx_sent_queue(iq->netdev_q, skb->len);
-	/* Ring Doorbell to notify the NIC there is a new packet */
-	writel(1, iq->doorbell_reg);
+
+#if defined(NO_SKB_XMIT_MORE)
+	xmit_more = netdev_xmit_more();
+#else
+	xmit_more = skb->xmit_more;
+#endif
+	skb_tx_timestamp(skb);
 	atomic_inc(&iq->instr_pending);
+	iq->fill_cnt++;
 	wi++;
 	if (wi == iq->max_count)
 		wi = 0;
 	iq->host_write_index = wi;
+	if (xmit_more &&
+			(atomic_read(&iq->instr_pending) <
+			 (iq->max_count - OCTEP_VF_WAKE_QUEUE_THRESHOLD)) &&
+			iq->fill_cnt < iq->fill_threshold)
+		return NETDEV_TX_OK;
 
-	iq->stats.instr_posted++;
-	skb_tx_timestamp(skb);
+	/* Flush the hw descriptors before writing to doorbell */
+	wmb();
+	writel(iq->fill_cnt, iq->doorbell_reg);
+	iq->stats.instr_posted += iq->fill_cnt;
+	iq->fill_cnt = 0;
 	return NETDEV_TX_OK;
 
 dma_map_sg_err:

@@ -15,7 +15,7 @@
 /* Tx Queue: maximum descriptors per ring */
 #define OCTEP_VF_IQ_MAX_DESCRIPTORS    1024
 /* Minimum input (Tx) requests to be enqueued to ring doorbell */
-#define OCTEP_VF_DB_MIN                1
+#define OCTEP_VF_DB_MIN                8
 /* Packet threshold for Tx queue interrupt */
 #define OCTEP_VF_IQ_INTR_THRESHOLD     0x0
 
