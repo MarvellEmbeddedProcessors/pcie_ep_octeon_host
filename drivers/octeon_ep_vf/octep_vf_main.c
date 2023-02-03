@@ -23,6 +23,7 @@ struct workqueue_struct *octep_vf_wq;
 /* Supported Devices */
 static const struct pci_device_id octep_vf_pci_id_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN93_VF)},
+	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF95O_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CNF95N_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN98_VF)},
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN10KA_VF)},
@@ -895,6 +896,8 @@ static const char *octep_vf_devid_to_str(struct octep_vf_device *oct)
 	switch (oct->chip_id) {
 	case OCTEP_PCI_DEVICE_ID_CN93_VF:
 		return "CN93XX";
+	case OCTEP_PCI_DEVICE_ID_CNF95O_VF:
+		return "CNF95O";
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
 		return "CNF95N";
 	case OCTEP_PCI_DEVICE_ID_CN10KA_VF:
@@ -944,6 +947,7 @@ int octep_vf_device_setup(struct octep_vf_device *oct)
 
 	switch (oct->chip_id) {
 	case OCTEP_PCI_DEVICE_ID_CN93_VF:
+	case OCTEP_PCI_DEVICE_ID_CNF95O_VF:
 	case OCTEP_PCI_DEVICE_ID_CNF95N_VF:
 	case OCTEP_PCI_DEVICE_ID_CN98_VF:
 		dev_info(&pdev->dev, "Setting up OCTEON %s VF PASS%d.%d\n",
