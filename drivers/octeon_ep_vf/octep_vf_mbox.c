@@ -96,6 +96,11 @@ static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
 
 	cmd.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
 	writeq(cmd.u64, mbox->mbox_write_reg);
+
+	/* No response for notification messages */
+	if (!rsp)
+		return 0;
+
 	for (count = 0; count < OCTEP_PFVF_MBOX_TIMEOUT_WAIT_COUNT; count++) {
 		usleep_range(1000, 1500);
 		reg_val = readq(mbox->mbox_write_reg);
