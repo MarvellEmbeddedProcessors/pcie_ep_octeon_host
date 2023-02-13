@@ -1455,7 +1455,7 @@ static void octep_device_cleanup(struct octep_device *oct)
 	oct->conf = NULL;
 }
 
-static u8 get_fw_ready_status(struct octep_device *oct)
+static bool get_fw_ready_status(struct octep_device *oct)
 {
 	u32 pos = 0;
 	u16 vsec_id;
@@ -1465,14 +1465,14 @@ static u8 get_fw_ready_status(struct octep_device *oct)
 						   PCI_EXT_CAP_ID_VNDR))) {
 		pci_read_config_word(oct->pdev, pos + 4, &vsec_id);
 #define FW_STATUS_VSEC_ID  0xA3
-		if (vsec_id == FW_STATUS_VSEC_ID) {
-			pci_read_config_byte(oct->pdev, (pos + 8), &status);
-			dev_info(&oct->pdev->dev, "Firmware ready %u\n",
-				 status);
-			return status;
-		}
+		if (vsec_id != FW_STATUS_VSEC_ID)
+			continue;
+
+		pci_read_config_byte(oct->pdev, (pos + 8), &status);
+		dev_info(&oct->pdev->dev, "Firmware ready status = %u\n", status);
+		return status ? true : false;
 	}
-	return 0;
+	return false;
 }
 
 /**
@@ -1490,14 +1490,11 @@ static void octep_dev_setup_task(struct work_struct *work)
 						dev_setup_task);
 	struct net_device *netdev = oct->netdev;
 	int max_rx_pktlen;
-	u8 status;
 	int err;
 
 	atomic_set(&oct->status, OCTEP_DEV_STATUS_WAIT_FOR_FW);
 	while (true) {
-		status = get_fw_ready_status(oct);
-#define FW_STATUS_READY    1
-		if (status == FW_STATUS_READY)
+		if (get_fw_ready_status(oct))
 			break;
 
 		schedule_timeout_interruptible(HZ * 1);
