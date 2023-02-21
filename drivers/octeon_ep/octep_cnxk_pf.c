@@ -433,6 +433,7 @@ static irqreturn_t octep_pfvf_mbox_intr_handler_cnxk_pf(void *dev)
 	return IRQ_HANDLED;
 }
 
+/* Poll OEI events like heartbeat */
 static void octep_poll_oei_cnxk_pf(struct octep_device *oct)
 {
 	u64 reg0;
@@ -452,6 +453,7 @@ static void octep_poll_oei_cnxk_pf(struct octep_device *oct)
 
 }
 
+/* OEI interrupt handler */
 static irqreturn_t octep_oei_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
@@ -470,12 +472,12 @@ static void octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
 	octep_poll_oei_cnxk_pf(oct);
 }
 
-/* Interrupts handler for all non-queue generic interrupts. */
-static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
+/* Interrupt handler for input ring error interrupts. */
+static irqreturn_t octep_ire_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	u64 reg_val = 0;
 	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
 	int i = 0;
 
 	/* Check for IRERR INTR */
@@ -496,8 +498,17 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 						  reg_val);
 			}
 		}
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for output ring error interrupts. */
+static irqreturn_t octep_ore_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
+	int i = 0;
 
 	/* Check for ORERR INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_ORERR_RINT);
@@ -515,9 +526,16 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 						  reg_val);
 			}
 		}
-
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for vf input ring error interrupts. */
+static irqreturn_t octep_vfire_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
 
 	/* Check for VFIRE INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_VFIRE_RINT(0));
@@ -525,8 +543,16 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 		dev_info(&pdev->dev,
 			 "Received VFIRE_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_VFIRE_RINT(0), reg_val);
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for vf output ring error interrupts. */
+static irqreturn_t octep_vfore_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
 
 	/* Check for VFORE INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_VFORE_RINT(0));
@@ -534,15 +560,30 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 		dev_info(&pdev->dev,
 			 "Received VFORE_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_VFORE_RINT(0), reg_val);
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for dpi dma related interrupts. */
+static irqreturn_t octep_dma_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	u64 reg_val = 0;
 
 	/* Check for DMA INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_DMA_RINT);
 	if (reg_val) {
 		octep_write_csr64(oct, CNXK_SDP_EPF_DMA_RINT, reg_val);
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for dpi dma transaction error interrupts for VFs  */
+static irqreturn_t octep_dma_vf_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
 
 	/* Check for DMA VF INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_DMA_VF_RINT(0));
@@ -550,8 +591,16 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 		dev_info(&pdev->dev,
 			 "Received DMA_VF_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_DMA_VF_RINT(0), reg_val);
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for pp transaction error interrupts for VFs  */
+static irqreturn_t octep_pp_vf_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
 
 	/* Check for PPVF INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_PP_VF_RINT(0));
@@ -559,8 +608,16 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 		dev_info(&pdev->dev,
 			 "Received PP_VF_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_PP_VF_RINT(0), reg_val);
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupt handler for mac related interrupts. */
+static irqreturn_t octep_misc_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
+	u64 reg_val = 0;
 
 	/* Check for MISC INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_MISC_RINT);
@@ -568,11 +625,17 @@ static irqreturn_t octep_non_ioq_intr_handler_cnxk_pf(void *dev)
 		dev_info(&pdev->dev,
 			 "Received MISC_RINT intr: 0x%llx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_MISC_RINT, reg_val);
-		goto irq_handled;
 	}
+	return IRQ_HANDLED;
+}
+
+/* Interrupts handler for all reserved interrupts. */
+static irqreturn_t octep_rsvd_intr_handler_cnxk_pf(void *dev)
+{
+	struct octep_device *oct = (struct octep_device *)dev;
+	struct pci_dev *pdev = oct->pdev;
 
 	dev_info(&pdev->dev, "Reserved interrupts raised; Ignore\n");
-irq_handled:
 	return IRQ_HANDLED;
 }
 
@@ -823,7 +886,15 @@ void octep_device_setup_cnxk_pf(struct octep_device *oct)
 
 	oct->hw_ops.mbox_intr_handler = octep_pfvf_mbox_intr_handler_cnxk_pf;
 	oct->hw_ops.oei_intr_handler = octep_oei_intr_handler_cnxk_pf;
-	oct->hw_ops.non_ioq_intr_handler = octep_non_ioq_intr_handler_cnxk_pf;
+	oct->hw_ops.ire_intr_handler = octep_ire_intr_handler_cnxk_pf;
+	oct->hw_ops.ore_intr_handler = octep_ore_intr_handler_cnxk_pf;
+	oct->hw_ops.vfire_intr_handler = octep_vfire_intr_handler_cnxk_pf;
+	oct->hw_ops.vfore_intr_handler = octep_vfore_intr_handler_cnxk_pf;
+	oct->hw_ops.dma_intr_handler = octep_dma_intr_handler_cnxk_pf;
+	oct->hw_ops.dma_vf_intr_handler = octep_dma_vf_intr_handler_cnxk_pf;
+	oct->hw_ops.pp_vf_intr_handler = octep_pp_vf_intr_handler_cnxk_pf;
+	oct->hw_ops.misc_intr_handler = octep_misc_intr_handler_cnxk_pf;
+	oct->hw_ops.rsvd_intr_handler = octep_rsvd_intr_handler_cnxk_pf;
 	oct->hw_ops.ioq_intr_handler = octep_ioq_intr_handler_cnxk_pf;
 	oct->hw_ops.soft_reset = octep_soft_reset_cnxk_pf;
 	oct->hw_ops.reinit_regs = octep_reinit_regs_cnxk_pf;
