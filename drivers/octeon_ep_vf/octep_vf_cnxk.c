@@ -156,6 +156,7 @@ static void octep_vf_init_config_cnxk_vf(struct octep_vf_device *oct)
 	conf->oq.refill_threshold = OCTEP_VF_OQ_REFILL_THRESHOLD;
 	conf->oq.oq_intr_pkt = OCTEP_VF_OQ_INTR_PKT_THRESHOLD;
 	conf->oq.oq_intr_time = OCTEP_VF_OQ_INTR_TIME_THRESHOLD;
+	conf->oq.wmark = OCTEP_VF_OQ_WMARK_MIN;
 
 	conf->msix_cfg.ioq_msix = conf->ring_cfg.active_io_rings;
 }
@@ -251,6 +252,11 @@ static void octep_vf_setup_oq_regs_cnxk(struct octep_vf_device *oct, int oq_no)
 	time_threshold = CFG_GET_OQ_INTR_TIME(oct->conf);
 	reg_val = ((u64)time_threshold << 32) | CFG_GET_OQ_INTR_PKT(oct->conf);
 	octep_vf_write_csr64(oct, CNXK_VF_SDP_R_OUT_INT_LEVELS(oq_no), reg_val);
+
+	/* set watermark for backpressure */
+	reg_val = octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_WMARK(oq_no));
+	reg_val |= CFG_GET_OQ_WMARK(oct->conf);
+	octep_vf_write_csr64(oct, CNXK_VF_SDP_R_OUT_WMARK(oq_no), reg_val);
 }
 
 /* Setup registers for a VF mailbox */

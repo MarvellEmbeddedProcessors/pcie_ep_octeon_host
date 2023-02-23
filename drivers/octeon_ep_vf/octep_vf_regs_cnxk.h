@@ -85,7 +85,7 @@
 #define    CNXK_VF_SDP_R_OUT_SLIST_RSIZE_START     0x10130
 #define    CNXK_VF_SDP_R_OUT_SLIST_DBELL_START     0x10140
 #define    CNXK_VF_SDP_R_OUT_CONTROL_START         0x10150
-
+#define    CNXK_VF_SDP_R_OUT_WMARK_START           0x10160
 #define    CNXK_VF_SDP_R_OUT_ENABLE_START          0x10170
 #define    CNXK_VF_SDP_R_OUT_PKT_CNT_START         0x10180
 #define    CNXK_VF_SDP_R_OUT_BYTE_CNT_START        0x10190
@@ -104,6 +104,9 @@
 
 #define    CNXK_VF_SDP_R_OUT_SLIST_DBELL(ring)          \
 	(CNXK_VF_SDP_R_OUT_SLIST_DBELL_START + ((ring) * CNXK_VF_RING_OFFSET))
+
+#define    CNXK_VF_SDP_R_OUT_WMARK(ring)          \
+	(CNXK_VF_SDP_R_OUT_WMARK_START + ((ring) * CNXK_VF_RING_OFFSET))
 
 #define    CNXK_VF_SDP_R_OUT_CNTS(ring)          \
 	(CNXK_VF_SDP_R_OUT_CNTS_START + ((ring) * CNXK_VF_RING_OFFSET))
