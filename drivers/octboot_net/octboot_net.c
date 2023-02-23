@@ -193,7 +193,8 @@ typedef struct {
 octboot_net_device_t octboot_net_device[8];
 
 static unsigned int vendor_id = 0x177d;
-static unsigned int device_id = 0xb400;
+static unsigned int device_id_cnf95n = 0xb400;
+static unsigned int device_id_cnf105n = 0xbc00;
 
 static uint64_t get_host_status(struct octboot_net_dev *mdev)
 {
@@ -321,54 +322,68 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 
 static void octboot_net_init_work(struct work_struct *work)
 {
-	int i, ret;
+	int i, j, ret;
 	unsigned long mapped_len = 0;
 
 	octnet_pci_dev = NULL;
 	octnet_num_device = 0;
 
-	//octnet_pci_dev = pci_get_device(vendor_id, device_id, NULL);
-	while ((octnet_pci_dev = pci_get_device(vendor_id, device_id,
+	while ((octnet_pci_dev = pci_get_device(vendor_id, device_id_cnf95n,
 					octnet_pci_dev))) {
 		if (octnet_pci_dev == NULL) {
 			pr_err("Invalid PCI bus or slot number\n");
 			return;
 		}
-		octnet_pci_dev_arr[octnet_num_device] = octnet_pci_dev;
+		pr_err("Found cnf95n Device\n");
+		octnet_pci_dev_arr[octnet_num_device++] = octnet_pci_dev;
+	}
+	octnet_pci_dev = NULL;
+	while ((octnet_pci_dev = pci_get_device(vendor_id, device_id_cnf105n,
+					octnet_pci_dev))) {
+		if (octnet_pci_dev == NULL) {
+			pr_err("Invalid PCI bus or slot number\n");
+			return;
+		}
+		pr_err("Found cnf105n Device\n");
+		octnet_pci_dev_arr[octnet_num_device++] = octnet_pci_dev;
+	}
 
+	for (j = 0; j < octnet_num_device; j++) {
+		octnet_pci_dev = octnet_pci_dev_arr[j];
+		if (octnet_pci_dev == NULL)
+			continue;
 		if (!pci_is_enabled(octnet_pci_dev)) {
 			ret = pci_enable_device(octnet_pci_dev);
 			if (ret) {
-				pr_err("Failed to enable F95N device 0x%x\n", ret);
+				pr_err("Failed to enable PCI device 0x%x\n", ret);
 				return;
 			}
 
-			ret = pci_set_dma_mask(octnet_pci_dev, DMA_BIT_MASK(64));
+			ret = dma_set_mask_and_coherent(&octnet_pci_dev->dev, DMA_BIT_MASK(64));
 			if (ret) {
-				pr_err("Failed to set DMA mask on F95N device 0x%x\n", ret);
+				pr_err("Failed to set DMA mask on PCI device 0x%x\n", ret);
 				return;
 			}
 			pci_set_master(octnet_pci_dev);
 		}
 
 		for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
-			octboot_net_device[octnet_num_device].mmio[i].start =
+			octboot_net_device[j].mmio[i].start =
 				pci_resource_start(octnet_pci_dev, i * 2);
-			octboot_net_device[octnet_num_device].mmio[i].len =
+			octboot_net_device[j].mmio[i].len =
 				pci_resource_len(octnet_pci_dev, i * 2);
 			mapped_len =
-			octboot_net_device[octnet_num_device].mmio[i].len;
-			octboot_net_device[octnet_num_device].mmio[i].hw_addr =
-			ioremap(octboot_net_device[octnet_num_device].mmio[i].start,
+			octboot_net_device[j].mmio[i].len;
+			octboot_net_device[j].mmio[i].hw_addr =
+			ioremap(octboot_net_device[j].mmio[i].start,
 			mapped_len);
-			octboot_net_device[octnet_num_device].mmio[i].done = 1;
+			octboot_net_device[j].mmio[i].done = 1;
 
 			if (i == 2) {
-				octboot_net_device[octnet_num_device].bar4_addr
-				= octboot_net_device[octnet_num_device].mmio[i].hw_addr;
+				octboot_net_device[j].bar4_addr
+				= octboot_net_device[j].mmio[i].hw_addr;
 			}
 		}
-		octnet_num_device++;
 	}
 
 	octboot_net_poll();
@@ -389,7 +404,7 @@ static void octboot_net_poll(void)
 
 		memcpy(&octboot_net_device[i].npu_memmap_info, src,
 			sizeof(struct uboot_pcinet_barmap));
-	signature = octboot_net_device[i].npu_memmap_info.signature;
+		signature = octboot_net_device[i].npu_memmap_info.signature;
 	// Check for signature and
 	if (signature == NPU_HANDSHAKE_SIGNATURE) {
 		pr_info("signature found %llu\n", signature);
@@ -481,20 +496,6 @@ static void octboot_net_get_stats64(struct net_device *dev,
 		s->tx_bytes   += mdev->txq[i].bytes;
 		s->tx_errors  += mdev->txq[i].errors;
 	}
-}
-
-static int octboot_net_set_mac(struct net_device *netdev, void *p)
-{
-	struct octboot_net_dev *mdev = netdev_priv(netdev);
-	struct sockaddr *addr = (struct sockaddr *)p;
-
-	if (!is_valid_ether_addr(addr->sa_data))
-		return -EADDRNOTAVAIL;
-
-	memcpy(netdev->dev_addr, addr->sa_data, netdev->addr_len);
-	memcpy(mdev->hw_addr, addr->sa_data, ETH_ALEN);
-
-	return 0;
 }
 
 netdev_tx_t octboot_net_tx(struct sk_buff *skb, struct net_device *dev)
@@ -590,7 +591,6 @@ static const struct net_device_ops octboot_netdev_ops = {
 	.ndo_stop            = octboot_net_close,
 	.ndo_start_xmit      = octboot_net_tx,
 	.ndo_get_stats64     = octboot_net_get_stats64,
-	.ndo_set_mac_address = octboot_net_set_mac,
 };
 
 static bool __handle_txq_completion(struct octboot_net_dev *mdev, int q_idx, int budget)
