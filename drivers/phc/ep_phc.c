@@ -21,7 +21,6 @@
 
 #include "linux_sysdep.h"
 #include "octeon_device.h"
-#include "version.h"
 #include "octeon_hw.h"
 
 
@@ -582,8 +581,7 @@ int octeon_ep_phc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	oct_dev->pci_dev = (void *)pdev;
 
 
-	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC: Loading PHC driver version: %s\n",
-		 SDK_VERSION);
+	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC: Loading PHC driver\n");
 
 	oct_dev->dev_init_wq.wq = alloc_workqueue("dev_init_wq", WQ_MEM_RECLAIM, 0);
 	oct_dev->dev_init_wq.wk.ctxptr = oct_dev;
