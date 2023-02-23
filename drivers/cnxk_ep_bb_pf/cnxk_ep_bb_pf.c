@@ -35,6 +35,8 @@ static int cnxk_epbb_pf_sriov_configure(struct pci_dev *pdev, int num_vfs)
 		ret = pci_enable_sriov(pdev, num_vfs);
 		if (!ret)
 			ret = num_vfs;
+		else
+			dev_err(dev, "Failed to enable sriov :0x%x\n", ret);
 	} else {
 		pci_disable_sriov(pdev);
 	}
