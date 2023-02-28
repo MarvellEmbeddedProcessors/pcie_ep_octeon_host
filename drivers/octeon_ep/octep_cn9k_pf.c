@@ -393,8 +393,14 @@ static void octep_poll_pfvf_mailbox(struct octep_device *oct)
 		active_rings_per_vf = CFG_GET_ACTIVE_RPVF(oct->conf);
 		for (vf = 0; vf < active_vfs; vf++) {
 			vf_mbox_queue = vf * active_rings_per_vf;
-			if (!(reg0 & (0x1UL << vf_mbox_queue)))
-				continue;
+
+			if (vf_mbox_queue < 64) {
+				if (!(reg0 & (0x1UL << vf_mbox_queue)))
+					continue;
+			} else {
+				if (!(reg1 & (0x1UL << (vf_mbox_queue - 64))))
+					continue;
+			}
 
 			if (!oct->mbox[vf_mbox_queue]) {
 				dev_err(&oct->pdev->dev, "bad mbox vf %d\n", vf);

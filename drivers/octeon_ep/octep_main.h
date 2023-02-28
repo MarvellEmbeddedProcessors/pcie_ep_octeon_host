@@ -38,7 +38,7 @@
 #define  OCTEP_MAX_QUEUES   63
 #define  OCTEP_MAX_IQ       OCTEP_MAX_QUEUES
 #define  OCTEP_MAX_OQ       OCTEP_MAX_QUEUES
-#define  OCTEP_MAX_VF       64
+#define  OCTEP_MAX_VF       128
 
 #define OCTEP_MAX_MSIX_VECTORS OCTEP_MAX_OQ
 
