@@ -43,6 +43,10 @@
 #define USE_ETHER_ADDR_COPY
 #else
 #endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) && \
+	(LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
+int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
+#endif
 #endif
 
 #endif /* _OCTEP_COMPAT_H_ */

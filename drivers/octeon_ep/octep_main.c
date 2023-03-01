@@ -22,6 +22,11 @@
 
 #define OCTEP_INTR_POLL_TIME_MSECS		100
 
+#define OCTEP_PTM_REQ_VSEC_ID		0x3
+#define OCTEP_PTM_REQ_CTL		0x8
+#define OCTEP_PTM_REQ_CTL_RAUEN		0x1
+#define OCTEP_PTM_REQ_CTL_RSD		0x2
+
 struct workqueue_struct *octep_wq;
 
 /* Supported Devices */
@@ -1561,6 +1566,43 @@ static void octep_dev_setup_task(struct work_struct *work)
 	dev_info(&oct->pdev->dev, "Device setup successful\n");
 }
 
+static int find_ptm_req_vsec(struct pci_dev *pdev)
+{
+	int vsec = 0;
+	u16 val;
+
+	while ((vsec = pci_find_next_ext_capability(pdev, vsec, PCI_EXT_CAP_ID_VNDR))) {
+		pci_read_config_word(pdev, vsec + PCI_VNDR_HEADER, &val);
+		if (val == OCTEP_PTM_REQ_VSEC_ID)
+			return vsec;
+	}
+
+	return 0;
+}
+
+static void octep_enable_ptm(struct pci_dev *pdev)
+{
+	int vsec = 0;
+	u32 val;
+	int err;
+
+	err = pci_enable_ptm(pdev, NULL);
+	if (err < 0)
+		dev_info(&pdev->dev, "PCIe PTM not supported by PCIe bus/controller\n");
+	else {
+		/* Vendor Specific PTM Configuration */
+		vsec = find_ptm_req_vsec(pdev);
+		if (!vsec)
+			dev_info(&pdev->dev, "No vendor specific PTM Requester capability found\n");
+		else {
+			pci_read_config_dword(pdev, vsec + OCTEP_PTM_REQ_CTL, &val);
+			/* enable PTM requester auto update and requester start update */
+			val |= (OCTEP_PTM_REQ_CTL_RAUEN | OCTEP_PTM_REQ_CTL_RSD);
+			pci_write_config_dword(pdev, vsec + OCTEP_PTM_REQ_CTL, val);
+		}
+	}
+}
+
 /**
  * octep_probe() - Octeon PCI device probe handler.
  *
@@ -1595,6 +1637,7 @@ static int octep_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	pci_enable_pcie_error_reporting(pdev);
+	octep_enable_ptm(pdev);
 	pci_set_master(pdev);
 
 	netdev = alloc_etherdev_mq(sizeof(struct octep_device),
