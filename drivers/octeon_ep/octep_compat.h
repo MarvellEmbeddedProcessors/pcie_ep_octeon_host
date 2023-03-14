@@ -24,7 +24,9 @@
 #error "RHEL versions before rhel-8.4 not supported !!!"
 #endif
 #if (RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(8, 4))
+#ifdef CONFIG_PCIE_PTM
 int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
+#endif
 #endif
 
 #else
@@ -48,7 +50,9 @@ int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
 #endif
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) && \
 	(LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
+#ifdef CONFIG_PCIE_PTM
 int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
+#endif
 #endif
 #endif
 

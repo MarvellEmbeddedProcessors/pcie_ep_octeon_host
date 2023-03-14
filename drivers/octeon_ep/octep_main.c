@@ -1566,6 +1566,7 @@ static void octep_dev_setup_task(struct work_struct *work)
 	dev_info(&oct->pdev->dev, "Device setup successful\n");
 }
 
+#ifdef CONFIG_PCIE_PTM
 static int find_ptm_req_vsec(struct pci_dev *pdev)
 {
 	int vsec = 0;
@@ -1602,6 +1603,9 @@ static void octep_enable_ptm(struct pci_dev *pdev)
 		}
 	}
 }
+#else
+static inline void octep_enable_ptm(struct pci_dev *pdev) { }
+#endif
 
 /**
  * octep_probe() - Octeon PCI device probe handler.
