@@ -148,9 +148,7 @@ void octeon_destroy_resources(octeon_device_t *oct_dev)
 	case OCT_DEV_PCI_MAP_DONE:
 		octeon_unmap_pci_barx(oct_dev, 0);
 		octeon_unmap_pci_barx(oct_dev, 1);
-		if (OCTEON_CN9PLUS_PF(oct_dev->chip_id)) {
-			octeon_unmap_pci_barx(oct_dev, 2);
-		}
+		octeon_unmap_pci_barx(oct_dev, 2);
 
 		dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: BAR unmapped.\n",
 				 oct_dev->octeon_id);
@@ -397,8 +395,7 @@ int octeon_chip_specific_setup(octeon_device_t *oct_dev)
 				 PCI_FUNC(oct_dev->pci_dev->devfn));
 
 		oct_dev->pf_num = oct_dev->octeon_id;
-		oct_dev->chip_id = OCTEON_CN10KA_ID_PF;
-
+		oct_dev->chip_id = dev_id >> 16;
 
 		if (octeon_map_pci_barx(oct_dev, 0, 0))
 			return -1;

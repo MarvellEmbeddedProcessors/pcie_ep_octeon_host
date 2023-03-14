@@ -211,6 +211,27 @@ static int oct_ep_ptp_gettime_cn10k(struct ptp_clock_info *ptp, struct timespec6
 	memcpy(ts, &tspec, sizeof(struct timespec64));
 	return 0;
 }
+
+static int oct_ep_ptp_gettime_cnf10kb(struct ptp_clock_info *ptp, struct timespec64 *ts)
+{
+	struct oct_ep_ptp_clock *ep_clk;
+	struct timespec64 tspec;
+	u64 ns;
+
+	ep_clk = container_of(ptp, struct oct_ep_ptp_clock, caps);
+	preempt_disable_notrace();
+
+	/* The CLOCK_HI represent the PTP time in nanoseconds */
+	ns = octeon_pci_bar4_read64(ep_clk->oct_dev, CN93XX_MIO_PTP_BAR4_REGION,
+			       CN93XX_MIO_PTP_CLOCK_HI_OFFSET);
+
+	preempt_enable_notrace();
+
+	tspec = ns_to_timespec64(ns);
+	memcpy(ts, &tspec, sizeof(struct timespec64));
+	return 0;
+}
+
 static int oct_ep_ptp_enable(struct ptp_clock_info *ptp,
 			  struct ptp_clock_request *rq, int on)
 {
@@ -396,7 +417,10 @@ static void octeon_device_init_work(struct work_struct *work)
 	}
 
 	if (OCTEON_CNXK_PF(oct_dev->chip_id) || OCTEON_CNFXK_PF(oct_dev->chip_id)) {
-	    oct_ep_ptp_caps.gettime64 = oct_ep_ptp_gettime_cn10k;
+		if (oct_dev->chip_id == OCTEON_CNF10KB_ID_PF)
+			oct_ep_ptp_caps.gettime64 = oct_ep_ptp_gettime_cnf10kb;
+		else
+			oct_ep_ptp_caps.gettime64 = oct_ep_ptp_gettime_cn10k;
 	}
 
 	oct_dev->oct_ep_ptp_clock->caps = oct_ep_ptp_caps;
