@@ -15,7 +15,7 @@
 #define PCI_VENDOR_ID_CAVIUM 0x177d
 #endif
 
-#define CNXK_EP_BB_PF_DEVICE_ID 0xEF01
+#define CNXK_EP_BB_PF_DEVICE_ID 0xEF04
 
 static struct pci_device_id cnxk_epbb_pf_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, CNXK_EP_BB_PF_DEVICE_ID) },
