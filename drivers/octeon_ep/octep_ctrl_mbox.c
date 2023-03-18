@@ -126,8 +126,8 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 	return 0;
 }
 
-static int write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi,
-			   u32 ci, void *buf, u32 w_sz)
+static int
+octep_write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi, u32 ci, void *buf, u32 w_sz)
 {
 	u32 cp_sz;
 	u8 __iomem *qbuf;
@@ -156,21 +156,18 @@ static int write_mbox_data(struct octep_ctrl_mbox_q *q, u32 *pi,
 	return 0;
 }
 
-int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox,
-			 struct octep_ctrl_mbox_msg *msgs,
-			 int num)
+int
+octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg)
 {
 	struct octep_ctrl_mbox_msg_buf *sg;
-	struct octep_ctrl_mbox_msg *msg;
 	struct octep_ctrl_mbox_q *q;
-	u32 pi, ci, prev_pi, buf_sz, w_sz;
-	int m, s;
+	u32 pi, ci, buf_sz, w_sz;
+	int s;
 
-	if (!mbox || !msgs)
+	if (!mbox || !msg)
 		return -EINVAL;
 
-	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) !=
-	    OCTEP_CTRL_MBOX_STATUS_READY)
+	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) != OCTEP_CTRL_MBOX_STATUS_READY)
 		return -EIO;
 
 	mutex_lock(&mbox->h2fq_lock);
@@ -181,43 +178,28 @@ int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox,
 		mutex_unlock(&mbox->f2hq_lock);
 		return -EIO;
 	}
-	for (m = 0; m < num; m++) {
-		msg = &msgs[m];
-		if (!msg)
-			break;
 
-		/* not enough space for next message */
-		if (octep_ctrl_mbox_circq_space(pi, ci, q->sz) <
-		    (msg->hdr.s.sz + mbox_hdr_sz))
-			break;
+	if (octep_ctrl_mbox_circq_space(pi, ci, q->sz) < (msg->hdr.s.sz + mbox_hdr_sz)) {
+		mutex_unlock(&mbox->f2hq_lock);
+		return -EAGAIN;
+	}
 
-		prev_pi = pi;
-		write_mbox_data(q, &pi, ci, (void *)&msg->hdr, mbox_hdr_sz);
-		buf_sz = msg->hdr.s.sz;
-		for (s = 0; ((s < msg->sg_num) && (buf_sz > 0)); s++) {
-			sg = &msg->sg_list[s];
-			w_sz = (sg->sz <= buf_sz) ? sg->sz : buf_sz;
-			write_mbox_data(q, &pi, ci, sg->msg, w_sz);
-			buf_sz -= w_sz;
-		}
-		if (buf_sz) {
-			/* we did not write entire message */
-			pi = prev_pi;
-			break;
-		}
+	octep_write_mbox_data(q, &pi, ci, (void *)&msg->hdr, mbox_hdr_sz);
+	buf_sz = msg->hdr.s.sz;
+	for (s = 0; ((s < msg->sg_num) && (buf_sz > 0)); s++) {
+		sg = &msg->sg_list[s];
+		w_sz = (sg->sz <= buf_sz) ? sg->sz : buf_sz;
+		octep_write_mbox_data(q, &pi, ci, sg->msg, w_sz);
+		buf_sz -= w_sz;
 	}
 	writel(pi, q->hw_prod);
 	mutex_unlock(&mbox->h2fq_lock);
 
-	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) !=
-	    OCTEP_CTRL_MBOX_STATUS_READY)
-		return -EIO;
-
-	return (m) ? m : -EAGAIN;
+	return 0;
 }
 
-static int read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi,
-			  u32 *ci, void *buf, u32 r_sz)
+static int
+octep_read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi, u32 *ci, void *buf, u32 r_sz)
 {
 	u32 cp_sz;
 	u8 __iomem *qbuf;
@@ -246,21 +228,18 @@ static int read_mbox_data(struct octep_ctrl_mbox_q *q, u32 pi,
 	return 0;
 }
 
-int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox,
-			 struct octep_ctrl_mbox_msg *msgs,
-			 int num)
+int
+octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg)
 {
 	struct octep_ctrl_mbox_msg_buf *sg;
-	struct octep_ctrl_mbox_msg *msg;
+	u32 pi, ci, r_sz, buf_sz, q_depth;
 	struct octep_ctrl_mbox_q *q;
-	u32 pi, ci, q_depth, r_sz, buf_sz, prev_ci;
-	int s, m;
+	int s;
 
-	if (!mbox || !msgs)
+	if (!mbox || !msg)
 		return -EINVAL;
 
-	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) !=
-	    OCTEP_CTRL_MBOX_STATUS_READY)
+	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) != OCTEP_CTRL_MBOX_STATUS_READY)
 		return -EIO;
 
 	mutex_lock(&mbox->f2hq_lock);
@@ -271,45 +250,33 @@ int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox,
 		mutex_unlock(&mbox->f2hq_lock);
 		return -EIO;
 	}
-	for (m = 0; m < num; m++) {
-		q_depth = octep_ctrl_mbox_circq_depth(pi, ci, q->sz);
-		if (q_depth < mbox_hdr_sz)
-			break;
 
-		msg = &msgs[m];
-		if (!msg)
-			break;
+	q_depth = octep_ctrl_mbox_circq_depth(pi, ci, q->sz);
+	if (q_depth < mbox_hdr_sz) {
+		mutex_unlock(&mbox->f2hq_lock);
+		return -EAGAIN;
+	}
 
-		prev_ci = ci;
-		read_mbox_data(q, pi, &ci, (void *)&msg->hdr, mbox_hdr_sz);
-		buf_sz = msg->hdr.s.sz;
-		if (q_depth < (mbox_hdr_sz + buf_sz)) {
-			ci = prev_ci;
-			break;
-		}
-		for (s = 0; ((s < msg->sg_num) && (buf_sz > 0)); s++) {
-			sg = &msg->sg_list[s];
-			r_sz = (sg->sz <= buf_sz) ? sg->sz : buf_sz;
-			read_mbox_data(q, pi, &ci, sg->msg, r_sz);
-			buf_sz -= r_sz;
-		}
-		if (buf_sz) {
-			/* we did not read entire message */
-			ci = prev_ci;
-			break;
-		}
+	octep_read_mbox_data(q, pi, &ci, (void *)&msg->hdr, mbox_hdr_sz);
+	buf_sz = msg->hdr.s.sz;
+
+	for (s = 0; ((s < msg->sg_num) && (buf_sz > 0)); s++) {
+		sg = &msg->sg_list[s];
+		r_sz = (sg->sz <= buf_sz) ? sg->sz : buf_sz;
+		octep_read_mbox_data(q, pi, &ci, sg->msg, r_sz);
+		buf_sz -= r_sz;
 	}
 	writel(ci, q->hw_cons);
 	mutex_unlock(&mbox->f2hq_lock);
 
-	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) !=
-	    OCTEP_CTRL_MBOX_STATUS_READY)
+	if (readq(OCTEP_CTRL_MBOX_INFO_FW_STATUS(mbox->barmem)) != OCTEP_CTRL_MBOX_STATUS_READY)
 		return -EIO;
 
-	return (m) ? m : -EAGAIN;
+	return 0;
 }
 
-int octep_ctrl_mbox_uninit(struct octep_ctrl_mbox *mbox)
+int
+octep_ctrl_mbox_uninit(struct octep_ctrl_mbox *mbox)
 {
 	if (!mbox)
 		return -EINVAL;

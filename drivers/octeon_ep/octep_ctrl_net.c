@@ -55,7 +55,7 @@ static int send_mbox_req(struct octep_device *oct,
 {
 	int err, ret;
 
-	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &d->msg, 1);
+	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &d->msg);
 	if (err < 0)
 		return err;
 
@@ -371,10 +371,8 @@ int octep_ctrl_net_recv_fw_messages(struct octep_device *oct)
 	while (true) {
 		/* mbox will overwrite msg.hdr.s.sz so initialize it */
 		msg.hdr.s.sz = msg_sz;
-		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox,
-					   (struct octep_ctrl_mbox_msg *)&msg,
-					   1);
-		if (ret <= 0)
+		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox, (struct octep_ctrl_mbox_msg *)&msg);
+		if (ret < 0)
 			break;
 
 		if (msg.hdr.s.flags & OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ)

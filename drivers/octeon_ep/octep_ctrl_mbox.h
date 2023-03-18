@@ -154,28 +154,22 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox);
 /* Send mbox message.
  *
  * @param mbox: non-null pointer to struct octep_ctrl_mbox.
- * @param msgs: Array of non-null pointers to struct octep_ctrl_mbox_msg.
- *             Caller should fill msg.sz and msg.desc.sz for each message.
- * @param num: Size of msg array.
+ * @param msg:  non-null pointer to struct octep_ctrl_mbox_msg.
+ *              Caller should fill msg.sz and msg.desc.sz for each message.
  *
- * return value: number of messages sent on success, -errno on failure.
+ * return value: 0 on success, -errno on failure.
  */
-int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox,
-			 struct octep_ctrl_mbox_msg *msgs,
-			 int num);
+int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg);
 
 /* Retrieve mbox message.
  *
  * @param mbox: non-null pointer to struct octep_ctrl_mbox.
- * @param msgs: Array of non-null pointers to struct octep_ctrl_mbox_msg.
- *             Caller should fill msg.sz and msg.desc.sz for each message.
- * @param num: Size of msg array.
+ * @param msg:  non-null pointer to struct octep_ctrl_mbox_msg.
+ *              Caller should fill msg.sz and msg.desc.sz for each message.
  *
- * return value: number of messages received on success, -errno on failure.
+ * return value: 0 on success, -errno on failure.
  */
-int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox,
-			 struct octep_ctrl_mbox_msg *msgs,
-			 int num);
+int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg);
 
 /* Uninitialize control mbox.
  *
