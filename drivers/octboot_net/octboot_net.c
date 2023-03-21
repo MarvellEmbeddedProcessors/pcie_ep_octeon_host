@@ -266,9 +266,12 @@ static void octboot_net_restart(void)
 static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 			union octboot_net_mbox_msg *msg)
 {
+	unsigned int flags;
 	int i, ret;
 
-	if (!(mdev->ndev->flags|IFF_RUNNING))
+	flags = READ_ONCE(mdev->ndev->flags);
+
+	if (!(flags | IFF_RUNNING))
 		return 0;
 
 	mutex_lock(&mdev->mbox_lock);
@@ -432,6 +435,8 @@ static void octboot_net_poll(void)
 				int ret;
 		/* This is restart */
 		if (mdev->octboot_net_restart == true) {
+			unsigned int flags;
+
 			netdev_err(mdev->ndev, "This is restart of mgmt service task\n");
 			change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
 			netif_carrier_off(mdev->ndev);
@@ -444,7 +449,11 @@ static void octboot_net_poll(void)
 				return;
 			}
 			change_host_status(mdev, OCTNET_HOST_READY, false);
-			mdev->ndev->flags |= IFF_RUNNING;
+			/* barrier to ensure the octboot_net_task thread  reads the updated flag */
+			flags = READ_ONCE(mdev->ndev->flags);
+			flags |= IFF_RUNNING;
+			WRITE_ONCE(mdev->ndev->flags, flags);
+			mdev->octboot_net_restart = false;
 			queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
 			usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 		}
