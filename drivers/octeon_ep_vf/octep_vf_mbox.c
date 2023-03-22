@@ -17,7 +17,7 @@
 
 static u32 pfvf_cmd_versions[OCTEP_PFVF_MBOX_CMD_MAX] = {
 	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1,
-	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_CMD_SET_OFFLOADS] =
+	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS] =
 		OCTEP_PFVF_MBOX_VERSION_V2
 };
 
@@ -91,6 +91,7 @@ void octep_vf_mbox_work(struct work_struct *work)
 	struct octep_vf_iface_link_info *link_info;
 	struct octep_vf_device *oct = NULL;
 	struct octep_vf_mbox *mbox = NULL;
+	union octep_pfvf_mbox_word *notif;
 	u64 pf_vf_data;
 
 	oct = (struct octep_vf_device *)wk->ctxptr;
@@ -99,10 +100,28 @@ void octep_vf_mbox_work(struct work_struct *work)
 	pf_vf_data = readq(mbox->mbox_read_reg);
 	if (unlikely(pf_vf_data == 0xFFFFFFFFFFFFFFFFU))
 		return;
-	if (!(pf_vf_data & OCTEP_PFVF_LINK_STATUS_DOWN))
-		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_DOWN;
-	else if (pf_vf_data & OCTEP_PFVF_LINK_STATUS_UP)
-		link_info->oper_up = OCTEP_PFVF_LINK_STATUS_UP;
+
+	notif = (union octep_pfvf_mbox_word *) &pf_vf_data;
+
+	switch (notif->s.opcode) {
+	case OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS:
+		if (notif->s_link_status.status) {
+			link_info->oper_up = OCTEP_PFVF_LINK_STATUS_UP;
+			netif_carrier_on(oct->netdev);
+			dev_info(&oct->pdev->dev, "netif_carrier_on\n");
+		} else {
+			link_info->oper_up = OCTEP_PFVF_LINK_STATUS_DOWN;
+			netif_carrier_off(oct->netdev);
+			dev_info(&oct->pdev->dev, "netif_carrier_off\n");
+		}
+		break;
+	default:
+		dev_err(&oct->pdev->dev,
+			"Received unsupported notif %d\n", notif->s.opcode);
+		break;
+	}
+
+	return;
 }
 
 static int __octep_vf_mbox_send_cmd(struct octep_vf_device *oct,
