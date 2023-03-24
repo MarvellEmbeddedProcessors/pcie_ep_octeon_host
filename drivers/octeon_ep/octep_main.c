@@ -1251,8 +1251,7 @@ static void octep_hb_timeout_task(struct work_struct *work)
 	    status != OCTEP_DEV_STATUS_READY)
 		return;
 
-	atomic_inc(&oct->hb_miss_cnt);
-	miss_cnt = atomic_read(&oct->hb_miss_cnt);
+	miss_cnt = atomic_inc_return(&oct->hb_miss_cnt);
 	if (miss_cnt < oct->conf->fw_info.hb_miss_count) {
 		queue_delayed_work(octep_wq, &oct->hb_task,
 				   msecs_to_jiffies(oct->conf->fw_info.hb_interval));
