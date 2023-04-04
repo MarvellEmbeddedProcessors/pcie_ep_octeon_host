@@ -22,6 +22,7 @@ static const u32 mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
 static const u32 mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
 static const u32 state_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_state);
 static const u32 link_info_sz = sizeof(struct octep_ctrl_net_link_info);
+static const u32 offloads_sz = sizeof(struct octep_ctrl_net_offloads);
 static atomic_t ctrl_net_msg_id;
 
 static void init_send_req(struct octep_ctrl_mbox_msg *msg, void *buf,
@@ -422,6 +423,21 @@ int octep_ctrl_net_dev_remove(struct octep_device *oct, int vfid)
 	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_DEV_REMOVE;
 
 	return send_mbox_req(oct, &d, false);
+}
+
+int octep_ctrl_net_set_offloads(struct octep_device *oct, int vfid,
+				struct octep_ctrl_net_offloads *offloads,
+				bool wait_for_response)
+{
+	struct octep_ctrl_net_wait_data d = {0};
+	struct octep_ctrl_net_h2f_req *req = &d.data.req;
+
+	init_send_req(&d.msg, req, offloads_sz, vfid);
+	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_OFFLOADS;
+	req->offloads.cmd = OCTEP_CTRL_NET_CMD_SET;
+	req->offloads.offloads = *offloads;
+
+	return send_mbox_req(oct, &d, wait_for_response);
 }
 
 int octep_ctrl_net_uninit(struct octep_device *oct)
