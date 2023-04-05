@@ -15,16 +15,7 @@
 #include "octep_ctrl_net.h"
 
 /* Control plane version */
-#define OCTEP_CP_VERSION_MAJOR		1
-#define OCTEP_CP_VERSION_MINOR		0
-#define OCTEP_CP_VERSION_VARIANT	0
-
-#define OCTEP_CP_VERSION(a, b, c)	(((a & 0xff) << 16) + \
-					 ((b & 0xff) << 8) + \
-					 (c & 0xff))
-#define OCTEP_CP_VERSION_CURRENT	(OCTEP_CP_VERSION(OCTEP_CP_VERSION_MAJOR, \
-							  OCTEP_CP_VERSION_MINOR, \
-							  OCTEP_CP_VERSION_VARIANT))
+#define OCTEP_CP_VERSION_CURRENT	OCTEP_CP_VERSION(1, 0, 0)
 
 static const u32 req_hdr_sz = sizeof(union octep_ctrl_net_req_hdr);
 static const u32 mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
@@ -53,7 +44,13 @@ static int send_mbox_req(struct octep_device *oct,
 			 struct octep_ctrl_net_wait_data *d,
 			 bool wait_for_response)
 {
-	int err, ret;
+	int err, ret, cmd;
+
+	/* check if firmware is compatible for this request */
+	cmd = d->data.req.hdr.s.cmd;
+	if (octep_ctrl_net_h2f_cmd_versions[cmd] > oct->ctrl_mbox.max_fw_version ||
+	    octep_ctrl_net_h2f_cmd_versions[cmd] < oct->ctrl_mbox.min_fw_version)
+		return -EOPNOTSUPP;
 
 	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &d->msg);
 	if (err < 0)
@@ -333,11 +330,19 @@ static int process_mbox_resp(struct octep_device *oct,
 static int process_mbox_notify(struct octep_device *oct,
 			       struct octep_ctrl_mbox_msg *msg)
 {
-	struct octep_ctrl_net_f2h_req *req;
 	struct net_device *netdev = oct->netdev;
+	struct octep_ctrl_net_f2h_req *req;
+	int cmd;
 
 	req = (struct octep_ctrl_net_f2h_req *)msg->sg_list[0].msg;
-	switch (req->hdr.s.cmd) {
+	cmd = req->hdr.s.cmd;
+
+	/* check if we support this command */
+	if (octep_ctrl_net_f2h_cmd_versions[cmd] > OCTEP_CP_VERSION_CURRENT ||
+	    octep_ctrl_net_f2h_cmd_versions[cmd] < OCTEP_CP_VERSION_CURRENT)
+		return -EOPNOTSUPP;
+
+	switch (cmd) {
 	case OCTEP_CTRL_NET_F2H_CMD_LINK_STATUS:
 		if (netif_running(netdev)) {
 			if (req->link.state) {
