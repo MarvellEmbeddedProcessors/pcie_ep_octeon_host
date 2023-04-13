@@ -33,6 +33,9 @@
 #define  OCTEP_VF_IQ_INTR_RESEND_BIT  59
 #define  OCTEP_VF_OQ_INTR_RESEND_BIT  59
 
+#define  IQ_INSTR_PENDING(iq)  ((iq->host_write_index - iq->flush_index) & iq->ring_size_mask)
+#define  IQ_INSTR_SPACE(iq)    (iq->max_count - IQ_INSTR_PENDING(iq))
+
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
  * Octeon gets mapped to different physical address spaces in

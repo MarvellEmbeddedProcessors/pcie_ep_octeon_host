@@ -115,9 +115,6 @@ struct octep_vf_iq {
 	/* Statistics for this input queue. */
 	struct octep_vf_iq_stats stats;
 
-	/* This field keeps track of the instructions pending in this queue. */
-	atomic_t instr_pending;
-
 	/* Pointer to the Virtual Base addr of the input ring. */
 	struct octep_vf_tx_desc_hw *desc_ring;
 
