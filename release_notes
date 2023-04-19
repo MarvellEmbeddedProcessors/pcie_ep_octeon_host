@@ -1,0 +1,17 @@
+PCIe-EP Octeon Host Release Notes
+=================================
+
+Supported Host Linux Kernel Version range
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- 5.4.0 to 5.15.0
+
+
+Known Issues
+------------
+- Only single PF per PEM is supported
+
+Change Logs
+-----------
+
+23.04
+~~~~~
