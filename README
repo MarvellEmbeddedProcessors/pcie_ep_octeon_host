@@ -1,0 +1,56 @@
+Octeon host Drivers for CN9K and CN10K series
+=============================================
+
+Copyright (C) 2023 Marvell.
+
+Contents
+========
+
+- Overview
+- Identifying CN9K/CN10K device
+- Building and Installation
+
+Overview
+========
+The purpose pcie_ep_octeon_host drivers is to provide the necessary linux kernel
+drivers for the host side for running packet IO between host and an
+Octeon CN9K or CN10K (referered collectively as CNXK) connected to that host
+in PCIe Endpoint mode.
+
+
+Identifying CN9K/CN10K device
+=============================
+#. Use lspci command to list Octeon devices on Host, as below:
+
+   .. code-block:: shell-session
+
+      # lspci | grep Cavium
+
+   The above command should show an output similar to
+
+   .. code-block:: shell-session
+
+      01:00.0 Network controller: Cavium, Inc. Device b200 /* 96xx PF  */
+      01:02.0 Network controller: Cavium, Inc. Device b203 /* 96xx VF0 */
+
+      01:00.0 Network controller: Cavium, Inc. Device b100 /* 98xx PF  */
+      01:02.0 Network controller: Cavium, Inc. Device b103 /* 98xx VF0 */
+
+      01:00.0 Network controller: Cavium, Inc. Device b400 /* 98xx PF  */
+      01:02.0 Network controller: Cavium, Inc. Device b403 /* 98xx VF0 */
+
+      81:00.0 Network controller: Cavium, Inc. Device b900 /* cn10ka PF  */
+      81:02.0 Network controller: Cavium, Inc. Device b903 /* cn10ka VF0 */
+
+      81:00.0 Network controller: Cavium, Inc. Device ba00 /* cnf10ka PF  */
+      81:02.0 Network controller: Cavium, Inc. Device ba03 /* cnf10ka VF0 */
+
+      81:00.0 Network controller: Cavium, Inc. Device bc00 /* cnf10ka PF  */
+      81:02.0 Network controller: Cavium, Inc. Device bc03 /* cnf10ka VF0 */
+
+   The PCI BDFs in the above example will vary from system to system.
+
+
+Building and Installation
+=========================
+
