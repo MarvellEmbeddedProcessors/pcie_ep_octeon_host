@@ -219,6 +219,7 @@ struct octep_iface_link_info {
 struct octep_pfvf_info {
 	u8 mac_addr[ETH_ALEN];
 	u32 flags;
+	u32 mbox_version;
 };
 
 /* Device status */
