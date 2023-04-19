@@ -6,7 +6,7 @@ KERNEL_DIR ?= /lib/modules/$(shell uname -r)/build
 
 SRCS = ep_phc.c octeon_device.c
 
-INCLUDE_DIR = -I$(OCTEONTX_HOST_ROOT)/drivers/phc/include
+INCLUDE_DIR = -I$(PWD)/include
 
 
 
