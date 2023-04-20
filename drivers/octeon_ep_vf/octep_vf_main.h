@@ -274,6 +274,9 @@ struct octep_vf_device {
 
 	/* Device state */
 	unsigned long state;
+
+	/* Negotiated Mbox version */
+	u32 mbox_neg_ver;
 };
 
 static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)
