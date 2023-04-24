@@ -51,6 +51,28 @@ Identifying CN9K/CN10K device
    The PCI BDFs in the above example will vary from system to system.
 
 
-Building and Installation
-=========================
+Building the Drivers
+====================
+#. Install the kernel development headers
+#. Run "make" from top level directory.
 
+   .. code-block:: shell-session
+
+     # make
+
+#. Find below kernel modules (.ko files) generated once make is finished.
+
+   .. code-block:: shell-session
+
+     ./drivers/octboot_net/octboot_net.ko
+     ./drivers/octeon_ep_vf/octeon_ep_vf.ko
+     ./drivers/phc/oct_ep_phc.ko
+     ./drivers/octeon_ep/octeon_ep.ko
+
+Testing the Drivers
+===================
+Testing the host drivers requires bring up of software on Octeon
+along with the host drivers.
+
+Refer PCIE-EP section in SDK documentation for instructions on how to
+bring up host drivers along with software on Octeon.
