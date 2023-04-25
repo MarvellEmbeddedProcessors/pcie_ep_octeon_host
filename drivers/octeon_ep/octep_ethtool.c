@@ -8,6 +8,7 @@
 #include <linux/pci.h>
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
+#include <linux/net_tstamp.h>
 
 #include "octep_config.h"
 #include "octep_main.h"
@@ -451,6 +452,15 @@ static int octep_set_link_ksettings(struct net_device *netdev,
 	return 0;
 }
 
+static int octep_get_ts_info(struct net_device *ndev, struct ethtool_ts_info *info)
+{
+	info->so_timestamping =
+		SOF_TIMESTAMPING_TX_SOFTWARE |
+		SOF_TIMESTAMPING_RX_SOFTWARE |
+		SOF_TIMESTAMPING_SOFTWARE;
+	return 0;
+}
+
 static const struct ethtool_ops octep_ethtool_ops = {
 	.get_drvinfo = octep_get_drvinfo,
 	.get_link = ethtool_op_get_link,
@@ -459,6 +469,7 @@ static const struct ethtool_ops octep_ethtool_ops = {
 	.get_ethtool_stats = octep_get_ethtool_stats,
 	.get_link_ksettings = octep_get_link_ksettings,
 	.set_link_ksettings = octep_set_link_ksettings,
+	.get_ts_info = octep_get_ts_info,
 };
 
 void octep_set_ethtool_ops(struct net_device *netdev)
