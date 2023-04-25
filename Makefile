@@ -8,6 +8,9 @@ SUBDIRS=drivers/octeon_ep
 SUBDIRS+=drivers/octeon_ep_vf
 SUBDIRS+=drivers/phc
 SUBDIRS+=drivers/octboot_net
+SUBDIRS+=drivers/cnxk_ep_bb_pf
+
+SUBDIRS+=apps/cnxk_ep_bb_pf
 
 all: $(SUBDIRS)
 		for d in $(SUBDIRS); do \
