@@ -16,7 +16,9 @@
  */
 
 static u32 pfvf_cmd_versions[OCTEP_PFVF_MBOX_CMD_MAX] = {
-	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1
+	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1,
+	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_CMD_SET_OFFLOADS] =
+		OCTEP_PFVF_MBOX_VERSION_V2
 };
 
 int octep_vf_setup_mbox(struct octep_vf_device *oct)
@@ -32,7 +34,7 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 	oct->hw_ops.setup_mbox_regs(oct, ring);
 	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
 	oct->mbox->wk.ctxptr = oct;
-	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_V1;
+	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_V2;
 
 	dev_info(&oct->pdev->dev, "setup vf mbox successfully\n");
 	return 0;
@@ -378,4 +380,52 @@ int octep_vf_mbox_dev_remove(struct octep_vf_device *oct)
 	cmd.s.opcode = OCTEP_PFVF_MBOX_CMD_DEV_REMOVE;
 	ret = octep_vf_mbox_send_cmd(oct, cmd, NULL);
 	return ret;
+}
+
+int octep_vf_mbox_get_fw_info(struct octep_vf_device *oct)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s_fw_info.opcode = OCTEP_PFVF_MBOX_CMD_GET_FW_INFO;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (ret) {
+		dev_err(&oct->pdev->dev, "Get link status via VF Mbox send failed\n");
+		return ret;
+	}
+	if (rsp.s_fw_info.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
+		dev_err(&oct->pdev->dev, "Get link status received NACK\n");
+		return -EINVAL;
+	}
+	oct->fw_info.pkind = rsp.s_fw_info.pkind;
+	oct->fw_info.fsz = rsp.s_fw_info.fsz;
+	oct->fw_info.rx_ol_flags = rsp.s_fw_info.rx_ol_flags;
+	oct->fw_info.tx_ol_flags = rsp.s_fw_info.tx_ol_flags;
+
+	return 0;
+}
+
+int octep_vf_mbox_set_offloads(struct octep_vf_device *oct, u16 tx_offloads,
+			       u16 rx_offloads)
+{
+	union octep_pfvf_mbox_word cmd;
+	union octep_pfvf_mbox_word rsp;
+	int ret;
+
+	cmd.u64 = 0;
+	cmd.s_offloads.opcode = OCTEP_PFVF_MBOX_CMD_SET_OFFLOADS;
+	cmd.s_offloads.rx_ol_flags = rx_offloads;
+	cmd.s_offloads.tx_ol_flags = tx_offloads;
+	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
+	if (ret) {
+		dev_err(&oct->pdev->dev, "Set offloads via VF Mbox send failed\n");
+		return ret;
+	}
+	if (rsp.s_link_state.type != OCTEP_PFVF_MBOX_TYPE_RSP_ACK) {
+		dev_err(&oct->pdev->dev, "Set offloads received NACK\n");
+		return -EINVAL;
+	}
+	return 0;
 }

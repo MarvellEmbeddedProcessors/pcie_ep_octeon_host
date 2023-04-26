@@ -146,7 +146,6 @@ static void octep_vf_init_config_cn93_vf(struct octep_vf_device *oct)
 
 	conf->iq.num_descs = OCTEP_VF_IQ_MAX_DESCRIPTORS;
 	conf->iq.instr_type = OCTEP_VF_64BYTE_INSTR;
-	conf->iq.pkind = 0;
 	conf->iq.db_min = OCTEP_VF_DB_MIN;
 	conf->iq.intr_threshold = OCTEP_VF_IQ_INTR_THRESHOLD;
 

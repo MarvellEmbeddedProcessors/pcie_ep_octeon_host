@@ -23,9 +23,28 @@ struct octep_vf_oq_desc_hw {
 
 #define OCTEP_VF_OQ_DESC_SIZE    (sizeof(struct octep_vf_oq_desc_hw))
 
-#define OCTEP_VF_CSUM_L4_VERIFIED 0x1
-#define OCTEP_VF_CSUM_IP_VERIFIED 0x2
-#define OCTEP_VF_CSUM_VERIFIED (OCTEP_VF_CSUM_L4_VERIFIED | OCTEP_VF_CSUM_IP_VERIFIED)
+/* Rx offload flags */
+#define OCTEP_VF_RX_OFFLOAD_VLAN_STRIP		BIT(0)
+#define OCTEP_VF_RX_OFFLOAD_IPV4_CKSUM		BIT(1)
+#define OCTEP_VF_RX_OFFLOAD_UDP_CKSUM		BIT(2)
+#define OCTEP_VF_RX_OFFLOAD_TCP_CKSUM		BIT(3)
+
+#define OCTEP_VF_RX_OFFLOAD_CKSUM		(OCTEP_VF_RX_OFFLOAD_IPV4_CKSUM | \
+						 OCTEP_VF_RX_OFFLOAD_UDP_CKSUM | \
+						 OCTEP_VF_RX_OFFLOAD_TCP_CKSUM)
+
+#define OCTEP_VF_RX_IP_CSUM(flags)		((flags) & \
+						 (OCTEP_VF_RX_OFFLOAD_IPV4_CKSUM | \
+						  OCTEP_VF_RX_OFFLOAD_TCP_CKSUM | \
+						  OCTEP_VF_RX_OFFLOAD_UDP_CKSUM))
+
+/* bit 0 is vlan strip */
+#define OCTEP_VF_RX_CSUM_IP_VERIFIED		BIT(1)
+#define OCTEP_VF_RX_CSUM_L4_VERIFIED		BIT(2)
+
+#define OCTEP_VF_RX_CSUM_VERIFIED(flags)	((flags) & \
+						 (OCTEP_VF_RX_CSUM_L4_VERIFIED | \
+						  OCTEP_VF_RX_CSUM_IP_VERIFIED))
 
 /* Extended Response Header in packet data received from Hardware.
  * Includes metadata like checksum status.
@@ -34,10 +53,10 @@ struct octep_vf_oq_desc_hw {
  */
 struct octep_vf_oq_resp_hw_ext {
 	/* Reserved. */
-	u64 reserved:62;
+	u64 rsvd:48;
 
-	/* checksum verified. */
-	u64 csum_verified:2;
+	/* rx offload flags */
+	u16 rx_ol_flags;
 } __packed;
 
 #define  OCTEP_VF_OQ_RESP_HW_EXT_SIZE   (sizeof(struct octep_vf_oq_resp_hw_ext))

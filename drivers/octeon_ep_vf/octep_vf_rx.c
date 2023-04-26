@@ -143,7 +143,7 @@ static int octep_vf_setup_oq(struct octep_vf_device *oct, int q_no)
 	 * additional header is filled-in by Octeon after length field in
 	 * Rx packets. this header contains additional packet information.
 	 */
-	if (oct->caps_enabled)
+	if (oct->fw_info.rx_ol_flags)
 		oq->max_single_buffer_size -= OCTEP_VF_OQ_RESP_HW_EXT_SIZE;
 
 	oq->refill_threshold = CFG_GET_OQ_REFILL_THRESHOLD(oct->conf);
@@ -382,11 +382,12 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 				    struct octep_vf_oq *oq, u16 pkts_to_process)
 {
 	struct octep_vf_oq_resp_hw_ext *resp_hw_ext = NULL;
+	netdev_features_t feat = oq->netdev->features;
 	struct octep_vf_rx_buffer *buff_info;
 	struct octep_vf_oq_resp_hw *resp_hw;
 	u32 pkt, rx_bytes, desc_used;
+	u16 data_offset, rx_ol_flags;
 	struct sk_buff *skb;
-	u16 data_offset;
 	u32 read_idx;
 
 	read_idx = oq->host_read_idx;
@@ -435,7 +436,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 
 		/* Swap the length field that is in Big-Endian to CPU */
 		buff_info->len = be64_to_cpu(resp_hw->length);
-		if (oct->caps_enabled & OCTEP_VF_CAP_RX_CHECKSUM) {
+		if (oct->fw_info.rx_ol_flags) {
 			/* Extended response header is immediately after
 			 * response header (resp_hw)
 			 */
@@ -447,11 +448,13 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 			 */
 			data_offset = OCTEP_VF_OQ_RESP_HW_SIZE +
 				      OCTEP_VF_OQ_RESP_HW_EXT_SIZE;
+			rx_ol_flags = resp_hw_ext->rx_ol_flags;
 		} else {
 			/* Data is immediately after
 			 * Hardware Rx response header.
 			 */
 			data_offset = OCTEP_VF_OQ_RESP_HW_SIZE;
+			rx_ol_flags = 0;
 		}
 		rx_bytes += buff_info->len;
 
@@ -507,8 +510,8 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 
 		skb->dev = oq->netdev;
 		skb->protocol =  eth_type_trans(skb, skb->dev);
-		if (resp_hw_ext &&
-		    resp_hw_ext->csum_verified == OCTEP_VF_CSUM_VERIFIED)
+		if (feat & NETIF_F_RXCSUM &&
+		    OCTEP_VF_RX_CSUM_VERIFIED(rx_ol_flags))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 		else
 			skb->ip_summed = CHECKSUM_NONE;

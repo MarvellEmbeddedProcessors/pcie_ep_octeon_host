@@ -57,7 +57,6 @@
 #define CFG_GET_IQ_CFG(cfg)             ((cfg)->iq)
 #define CFG_GET_IQ_NUM_DESC(cfg)        ((cfg)->iq.num_descs)
 #define CFG_GET_IQ_INSTR_TYPE(cfg)      ((cfg)->iq.instr_type)
-#define CFG_GET_IQ_PKIND(cfg)           ((cfg)->iq.pkind)
 #define CFG_GET_IQ_INSTR_SIZE(cfg)      (64)
 #define CFG_GET_IQ_DB_MIN(cfg)          ((cfg)->iq.db_min)
 #define CFG_GET_IQ_INTR_THRESHOLD(cfg)  ((cfg)->iq.intr_threshold)
@@ -72,7 +71,6 @@
 #define CFG_GET_PORTS_ACTIVE_IO_RINGS(cfg) ((cfg)->ring_cfg.active_io_rings)
 #define CFG_GET_PORTS_MAX_IO_RINGS(cfg) ((cfg)->ring_cfg.max_io_rings)
 
-#define CFG_GET_DPI_PKIND(cfg)            ((cfg)->core_cfg.dpi_pkind)
 #define CFG_GET_CORE_TICS_PER_US(cfg)     ((cfg)->core_cfg.core_tics_per_us)
 #define CFG_GET_COPROC_TICS_PER_US(cfg)   ((cfg)->core_cfg.coproc_tics_per_us)
 
@@ -85,9 +83,6 @@ struct octep_vf_iq_config {
 
 	/* Command size - 32 or 64 bytes */
 	u16 instr_type;
-
-	/* pkind for packets sent to Octeon */
-	u16 pkind;
 
 	/* Minimum number of commands pending to be posted to Octeon before driver
 	 * hits the Input queue doorbell.

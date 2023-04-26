@@ -204,6 +204,18 @@ enum octep_vf_dev_state {
 	OCTEP_VF_DEV_STATE_READ_STATS,
 };
 
+struct octep_vf_fw_info {
+	/* pkind value to be used in every Tx hardware descriptor */
+	u8 pkind;
+	/* front size data */
+	u8 fsz;
+	/* supported rx offloads OCTEP_VF_RX_OFFLOAD_* */
+	u16 rx_ol_flags;
+	/* supported tx offloads OCTEP_VF_TX_OFFLOAD_* */
+	u16 tx_ol_flags;
+};
+
+
 /* The Octeon device specific private data structure.
  * Each Octeon device has this structure to represent all its components.
  */
@@ -234,8 +246,6 @@ struct octep_vf_device {
 
 	/* Tx queues (IQ: Instruction Queue) */
 	u16 num_iqs;
-	/* pkind value to be used in every Tx hardware descriptor */
-	u8 pkind;
 	/* Pointers to Octeon Tx queues */
 	struct octep_vf_iq *iq[OCTEP_VF_MAX_IQ];
 
@@ -280,6 +290,9 @@ struct octep_vf_device {
 
 	/* Negotiated Mbox version */
 	u32 mbox_neg_ver;
+
+	/* firmware info */
+	struct octep_vf_fw_info fw_info;
 };
 
 static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)
