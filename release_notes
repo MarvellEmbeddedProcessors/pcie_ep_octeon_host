@@ -5,13 +5,14 @@ Supported Host Linux Kernel Version range
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 - 5.4.0 to 5.15.0
 
-
 Known Issues
 ------------
 - Only single PF per PEM is supported
+- octboot_net can intermittently fail with multiple devices
 
 Change Logs
 -----------
 
-23.04
+v23.04
 ~~~~~
+- Initial release of host drivers
