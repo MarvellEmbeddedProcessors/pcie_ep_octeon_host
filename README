@@ -3,6 +3,10 @@ Octeon host Drivers for CN9K and CN10K series
 
 Copyright (C) 2023 Marvell.
 
+This repo contains Marvell Octeon host Drivers.
+Provided "AS IS" and WITHOUT SUPPORT. No support for any changes made to this code. No support on building from this source.
+This is just reference host driver for Octeon PCIe card and is not at production level quality.
+
 Contents
 ========
 
