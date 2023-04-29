@@ -143,7 +143,7 @@ static int octep_setup_oq(struct octep_device *oct, int q_no)
 	 * additional header is filled-in by Octeon after length field in
 	 * Rx packets. this header contains additional packet information.
 	 */
-	if (oq->netdev->features & NETIF_F_RXCSUM)
+	if (oct->conf->fw_info.rx_ol_flags)
 		oq->max_single_buffer_size -= OCTEP_OQ_RESP_HW_EXT_SIZE;
 
 	oq->refill_threshold = CFG_GET_OQ_REFILL_THRESHOLD(oct->conf);
@@ -434,7 +434,7 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 
 		/* Swap the length field that is in Big-Endian to CPU */
 		buff_info->len = be64_to_cpu(resp_hw->length);
-		if (feat & NETIF_F_RXCSUM) {
+		if (oct->conf->fw_info.rx_ol_flags) {
 			/* Extended response header is immediately after
 			 * response header (resp_hw)
 			 */
@@ -508,8 +508,8 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 
 		skb->dev = oq->netdev;
 		skb->protocol =  eth_type_trans(skb, skb->dev);
-
-		if (OCTEP_RX_CSUM_VERIFIED(rx_ol_flags))
+		if (feat & NETIF_F_RXCSUM &&
+		    OCTEP_RX_CSUM_VERIFIED(rx_ol_flags))
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 		else
 			skb->ip_summed = CHECKSUM_NONE;
