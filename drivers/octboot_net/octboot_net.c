@@ -27,11 +27,22 @@
 #define OCTBOOT_NET_VERSION_MAJOR 1
 #define OCTBOOT_NET_VERSION_MINOR 0
 
+struct octboot_net_struct {
+	struct octboot_net_dev *gmdev;
+	struct pci_dev *octnet_pci_dev_arr;
+	int pci_bus;
+	int pci_device;
+	int pci_fn;
+	int octboot_net_init_done;
+	int initialized;
+};
+
+static struct octboot_net_struct octboot_struct[8];
+
 static struct workqueue_struct *octboot_net_init_wq;
 static struct delayed_work octboot_net_init_task;
 static struct octboot_net_dev *gmdev[8];
 static struct pci_dev *octnet_pci_dev;
-static struct pci_dev *octnet_pci_dev_arr[8];
 static int octnet_num_device;
 static int octboot_net_init_done[8];
 static int octboot_net_init_task_restart;
@@ -323,38 +334,79 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 	mbox_send_msg(mdev, &msg);
 }
 
+static int find_octboot_net_entry(struct pci_dev *octnet_pci_dev)
+{
+	int i;
+	int pci_bus, pci_device, pci_fn;
+
+	pci_bus = octnet_pci_dev->bus->number;
+	pci_device = PCI_SLOT(octnet_pci_dev->devfn);
+	pci_fn = PCI_FUNC(octnet_pci_dev->devfn);
+
+	for (i = 0; i < 8; i++) {
+		if (octboot_struct[i].initialized &&
+			octboot_struct[i].pci_bus == pci_bus &&
+			octboot_struct[i].pci_device == pci_device &&
+			octboot_struct[i].pci_fn == pci_fn) {
+			dev_info(&octnet_pci_dev->dev, "Found pci device at idx %d\n", i);
+			return i;
+		}
+	}
+	return -1;
+}
+
+static int add_octboot_net_entry(struct pci_dev *octnet_pci_dev)
+{
+	int i;
+	int pci_bus, pci_device, pci_fn;
+
+	pci_bus = octnet_pci_dev->bus->number;
+	pci_device = PCI_SLOT(octnet_pci_dev->devfn);
+	pci_fn = PCI_FUNC(octnet_pci_dev->devfn);
+
+	for (i = 0; i < 8; i++) {
+		if (!octboot_struct[i].initialized) {
+			octboot_struct[i].octnet_pci_dev_arr = octnet_pci_dev;
+			octboot_struct[i].pci_bus = pci_bus;
+			octboot_struct[i].pci_device = pci_device;
+			octboot_struct[i].pci_fn = pci_fn;
+			octboot_struct[i].initialized = true;
+			return i;
+		}
+	}
+	return -1;
+}
+
 static void octboot_net_init_work(struct work_struct *work)
 {
-	int i, j, ret;
 	unsigned long mapped_len = 0;
+	int i, ret, entry_idx;
 
 	octnet_pci_dev = NULL;
 	octnet_num_device = 0;
 
-	while ((octnet_pci_dev = pci_get_device(vendor_id, device_id_cnf95n,
-					octnet_pci_dev))) {
-		if (octnet_pci_dev == NULL) {
-			pr_err("Invalid PCI bus or slot number\n");
-			return;
-		}
-		pr_err("Found cnf95n Device\n");
-		octnet_pci_dev_arr[octnet_num_device++] = octnet_pci_dev;
-	}
-	octnet_pci_dev = NULL;
-	while ((octnet_pci_dev = pci_get_device(vendor_id, device_id_cnf105n,
-					octnet_pci_dev))) {
-		if (octnet_pci_dev == NULL) {
-			pr_err("Invalid PCI bus or slot number\n");
-			return;
-		}
-		pr_err("Found cnf105n Device\n");
-		octnet_pci_dev_arr[octnet_num_device++] = octnet_pci_dev;
-	}
-
-	for (j = 0; j < octnet_num_device; j++) {
-		octnet_pci_dev = octnet_pci_dev_arr[j];
-		if (octnet_pci_dev == NULL)
+	while ((octnet_pci_dev = pci_get_device(vendor_id, PCI_ANY_ID, octnet_pci_dev))) {
+		if ((octnet_pci_dev->device != device_id_loki) &&
+		    (octnet_pci_dev->device != device_id_thor))
 			continue;
+
+		/* Found supported Octeon device */
+		dev_info(&octnet_pci_dev->dev,
+			 "Found device named %s\n", pci_name(octnet_pci_dev));
+		entry_idx = find_octboot_net_entry(octnet_pci_dev);
+
+		if (entry_idx == -1) {
+			entry_idx = add_octboot_net_entry(octnet_pci_dev);
+
+			if (entry_idx == -1) {
+				pr_err("PCI device entry not added to table\n");
+				return;
+			}
+
+			pr_info("add_octboot_net_entry %d num_devices=%d\n",
+				entry_idx, octnet_num_device);
+		}
+
 		if (!pci_is_enabled(octnet_pci_dev)) {
 			ret = pci_enable_device(octnet_pci_dev);
 			if (ret) {
@@ -371,22 +423,21 @@ static void octboot_net_init_work(struct work_struct *work)
 		}
 
 		for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
-			octboot_net_device[j].mmio[i].start =
+			octboot_net_device[entry_idx].mmio[i].start =
 				pci_resource_start(octnet_pci_dev, i * 2);
-			octboot_net_device[j].mmio[i].len =
+			octboot_net_device[entry_idx].mmio[i].len =
 				pci_resource_len(octnet_pci_dev, i * 2);
-			mapped_len =
-			octboot_net_device[j].mmio[i].len;
-			octboot_net_device[j].mmio[i].hw_addr =
-			ioremap(octboot_net_device[j].mmio[i].start,
-			mapped_len);
-			octboot_net_device[j].mmio[i].done = 1;
+			mapped_len = octboot_net_device[entry_idx].mmio[i].len;
+			octboot_net_device[entry_idx].mmio[i].hw_addr =
+				ioremap(octboot_net_device[entry_idx].mmio[i].start, mapped_len);
+			octboot_net_device[entry_idx].mmio[i].done = 1;
 
 			if (i == 2) {
-				octboot_net_device[j].bar4_addr
-				= octboot_net_device[j].mmio[i].hw_addr;
+				octboot_net_device[entry_idx].bar4_addr =
+					octboot_net_device[entry_idx].mmio[i].hw_addr;
 			}
 		}
+		octnet_num_device++;
 	}
 
 	octboot_net_poll();
@@ -410,7 +461,7 @@ static void octboot_net_poll(void)
 		signature = octboot_net_device[i].npu_memmap_info.signature;
 	// Check for signature and
 	if (signature == NPU_HANDSHAKE_SIGNATURE) {
-		pr_info("signature found %llu\n", signature);
+		pr_info("signature found %llu device %d\n", signature, i);
 		octboot_net_device[i].signature_found = true;
 	// Uboot is booting and requires a netdevice for tftp
 	} else
@@ -1257,7 +1308,7 @@ static void mgmt_init_work(void *bar4_addr, int index)
 	uint32_t host_version;
 	uint32_t target_version;
 
-	octnet_pci_device = octnet_pci_dev_arr[index];
+	octnet_pci_device = octboot_struct[index].octnet_pci_dev_arr;
 
 	max_txq = num_txq = OCTBOOT_NET_MAXQ;
 	max_rxq = num_rxq = OCTBOOT_NET_MAXQ;
