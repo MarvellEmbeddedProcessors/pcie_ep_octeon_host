@@ -204,8 +204,8 @@ typedef struct {
 octboot_net_device_t octboot_net_device[8];
 
 static unsigned int vendor_id = 0x177d;
-static unsigned int device_id_cnf95n = 0xb400;
-static unsigned int device_id_cnf105n = 0xbc00;
+static unsigned int device_id_f95n = 0xb400;
+static unsigned int device_id_f105n = 0xbc00;
 
 static uint64_t get_host_status(struct octboot_net_dev *mdev)
 {
@@ -386,8 +386,8 @@ static void octboot_net_init_work(struct work_struct *work)
 	octnet_num_device = 0;
 
 	while ((octnet_pci_dev = pci_get_device(vendor_id, PCI_ANY_ID, octnet_pci_dev))) {
-		if ((octnet_pci_dev->device != device_id_loki) &&
-		    (octnet_pci_dev->device != device_id_thor))
+		if ((octnet_pci_dev->device != device_id_f95n) &&
+		    (octnet_pci_dev->device != device_id_f105n))
 			continue;
 
 		/* Found supported Octeon device */
