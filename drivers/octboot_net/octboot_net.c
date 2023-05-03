@@ -323,8 +323,8 @@ static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 {
 	union octboot_net_mbox_msg msg;
 
-	netdev_err(mdev->ndev, "change host status from %llu to %llu\n",
-		readq(HOST_STATUS_REG(mdev)), status);
+	netdev_err(mdev->ndev, "change host status from %lld to %lld\n",
+		   readq(HOST_STATUS_REG(mdev)), status);
 
 	writeq(status, HOST_STATUS_REG(mdev));
 	memset(&msg, 0, sizeof(union octboot_net_mbox_msg));
@@ -348,7 +348,7 @@ static int find_octboot_net_entry(struct pci_dev *octnet_pci_dev)
 			octboot_struct[i].pci_bus == pci_bus &&
 			octboot_struct[i].pci_device == pci_device &&
 			octboot_struct[i].pci_fn == pci_fn) {
-			dev_info(&octnet_pci_dev->dev, "Found pci device at idx %d\n", i);
+			dev_dbg(&octnet_pci_dev->dev, "Found octboot device at idx %d\n", i);
 			return i;
 		}
 	}
@@ -391,26 +391,27 @@ static void octboot_net_init_work(struct work_struct *work)
 			continue;
 
 		/* Found supported Octeon device */
-		dev_info(&octnet_pci_dev->dev,
-			 "Found device named %s\n", pci_name(octnet_pci_dev));
+		dev_dbg(&octnet_pci_dev->dev,
+			"Initializing device (devid=0x%x)\n", octnet_pci_dev->device);
 		entry_idx = find_octboot_net_entry(octnet_pci_dev);
 
 		if (entry_idx == -1) {
 			entry_idx = add_octboot_net_entry(octnet_pci_dev);
 
 			if (entry_idx == -1) {
-				pr_err("PCI device entry not added to table\n");
+				dev_info(&octnet_pci_dev->dev,
+					 "PCI device entry not added to table\n");
 				return;
 			}
 
-			pr_info("add_octboot_net_entry %d num_devices=%d\n",
-				entry_idx, octnet_num_device);
+			dev_info(&octnet_pci_dev->dev, "Device added at entry %d\n", entry_idx);
 		}
 
 		if (!pci_is_enabled(octnet_pci_dev)) {
 			ret = pci_enable_device(octnet_pci_dev);
 			if (ret) {
-				pr_err("Failed to enable PCI device 0x%x\n", ret);
+				dev_info(&octnet_pci_dev->dev,
+					 "Failed to enable PCI device 0x%x\n", ret);
 				return;
 			}
 
@@ -446,26 +447,36 @@ static void octboot_net_init_work(struct work_struct *work)
 
 static void octboot_net_poll(void)
 {
+	struct pci_dev *octnet_pci_device;
 	int offset = SIGNATURE_OFFSET; /* BAR4 index 8 is at this offset */
 	uint64_t signature;
-	void *src;
 	void *bar4_addr;
+	void *src;
 	int i;
 
 	for (i = 0; i < octnet_num_device; i++) {
 		bar4_addr = octboot_net_device[i].bar4_addr;
 		src = bar4_addr + offset;
 
+		octnet_pci_device = octboot_struct[i].octnet_pci_dev_arr;
 		memcpy(&octboot_net_device[i].npu_memmap_info, src,
 			sizeof(struct uboot_pcinet_barmap));
 		signature = octboot_net_device[i].npu_memmap_info.signature;
-	// Check for signature and
-	if (signature == NPU_HANDSHAKE_SIGNATURE) {
-		pr_info("signature found %llu device %d\n", signature, i);
-		octboot_net_device[i].signature_found = true;
-	// Uboot is booting and requires a netdevice for tftp
-	} else
-		octboot_net_device[i].signature_found = false;
+		/* Check for signature */
+		if (signature == NPU_HANDSHAKE_SIGNATURE) {
+			/* Uboot is booting and requires a netdevice for tftp */
+			if (!octboot_net_device[i].signature_found)
+				dev_info(&octnet_pci_device->dev,
+					 "[Device-%d] Found valid signature 0x%llx\n",
+					 i, signature);
+			octboot_net_device[i].signature_found = true;
+		} else {
+			if (octboot_net_device[i].signature_found)
+				dev_info(&octnet_pci_device->dev,
+					 "[Device-%d] Found invalid signature 0x%llx\n",
+					 i, signature);
+			octboot_net_device[i].signature_found = false;
+		}
 	}
 	
 	/* Now that we have the signature, the next step is to create a
