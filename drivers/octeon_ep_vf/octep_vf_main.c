@@ -698,13 +698,17 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 		}
 		hw_desc->dptr = tx_buffer->sglist_dma;
 	}
-	if ((feat & (NETIF_F_TSO)) && (skb_is_gso(skb))) {
-		hw_desc->txm.ol_flags = OCTEP_VF_TX_OFFLOAD_CKSUM;
-		hw_desc->txm.ol_flags |= OCTEP_VF_TX_OFFLOAD_TSO;
-		hw_desc->txm.gso_size =  skb_shinfo(skb)->gso_size;
-		hw_desc->txm.gso_segs =  skb_shinfo(skb)->gso_segs;
-	} else if (feat & (NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM)) {
-		hw_desc->txm.ol_flags = OCTEP_VF_TX_OFFLOAD_CKSUM;
+	if (oct->fw_info.tx_ol_flags) {
+		if ((feat & (NETIF_F_TSO)) && (skb_is_gso(skb))) {
+			hw_desc->txm.ol_flags = OCTEP_VF_TX_OFFLOAD_CKSUM;
+			hw_desc->txm.ol_flags |= OCTEP_VF_TX_OFFLOAD_TSO;
+			hw_desc->txm.gso_size =  skb_shinfo(skb)->gso_size;
+			hw_desc->txm.gso_segs =  skb_shinfo(skb)->gso_segs;
+		} else if (feat & (NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM)) {
+			hw_desc->txm.ol_flags = OCTEP_VF_TX_OFFLOAD_CKSUM;
+		}
+		/* due to ESR txm will be swappeed by hw */
+		hw_desc->txm64[0] = cpu_to_be64(hw_desc->txm64[0]);
 	}
 
 	netdev_tx_sent_queue(iq->netdev_q, skb->len);
@@ -907,8 +911,7 @@ static netdev_features_t octep_vf_fix_features(struct net_device *netdev,
 {
 	netdev_features_t ret;
 
-	/* we don't want NETIF_F_SG to be changeable */
-	ret = (netdev->hw_features & ~NETIF_F_SG);
+	ret = (netdev->hw_features & features);
 
 	return ret;
 }
