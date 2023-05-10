@@ -1164,7 +1164,11 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (OCTEP_VF_TX_TSO(octep_vf_dev->fw_info.tx_ol_flags)) {
 		netdev->hw_features |= NETIF_F_TSO;
+#if defined(NO_SET_GSO_API)
+		netif_set_tso_max_size(netdev, netdev->max_mtu);
+#else
 		netif_set_gso_max_size(netdev, netdev->max_mtu);
+#endif
 	}
 
 	netdev->features |= netdev->hw_features;
