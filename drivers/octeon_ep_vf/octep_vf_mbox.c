@@ -36,12 +36,7 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 	oct->hw_ops.setup_mbox_regs(oct, ring);
 	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
 	oct->mbox->wk.ctxptr = oct;
-<<<<<<< HEAD
 	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_CURRENT;
-=======
-	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_V3;
-
->>>>>>> 3f0239b (octeon_ep_vf: add graceful PF FLR support)
 	dev_info(&oct->pdev->dev, "setup vf mbox successfully\n");
 	return 0;
 }
