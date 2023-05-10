@@ -34,7 +34,7 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 	oct->hw_ops.setup_mbox_regs(oct, ring);
 	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
 	oct->mbox->wk.ctxptr = oct;
-	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_V2;
+	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_CURRENT;
 
 	dev_info(&oct->pdev->dev, "setup vf mbox successfully\n");
 	return 0;
@@ -63,19 +63,10 @@ int octep_vf_mbox_version_check(struct octep_vf_device *oct)
 	cmd.s_version.opcode = OCTEP_PFVF_MBOX_CMD_VERSION;
 	cmd.s_version.version = OCTEP_PFVF_MBOX_VERSION_CURRENT;
 	ret = octep_vf_mbox_send_cmd(oct, cmd, &rsp);
-	/*
-	 * VF receives NACK or version info as zero
-	 * only if PF driver running old version of Mailbox
-	 * In this case VF mailbox version fallbacks to base
-	 * mailbox vesrion OTX_EP_MBOX_VERSION_V1.
-	 * Default VF mbox_neg_ver is set to OTX_EP_MBOX_VERSION_V1
-	 * during initialization of VF driver.
-	 */
-	if (ret == OCTEP_PFVF_MBOX_CMD_STATUS_NACK || rsp.s_version.version == 0) {
-		dev_dbg(&oct->pdev->dev,
-			"VF Mbox version fallback to base version from:%u\n",
-			(u32)cmd.s_version.version);
-		return 0;
+	if (ret == OCTEP_PFVF_MBOX_CMD_STATUS_NACK) {
+		dev_err(&oct->pdev->dev,
+			"VF Mbox version is incompatible with PF\n");
+		return -EINVAL;
 	}
 	oct->mbox_neg_ver = (u32)rsp.s_version.version;
 	dev_dbg(&oct->pdev->dev,
