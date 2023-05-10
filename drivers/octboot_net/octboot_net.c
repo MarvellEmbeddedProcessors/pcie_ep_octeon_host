@@ -42,7 +42,6 @@ static struct octboot_net_struct octboot_struct[8];
 static struct workqueue_struct *octboot_net_init_wq;
 static struct delayed_work octboot_net_init_task;
 static struct octboot_net_dev *gmdev[8];
-static struct pci_dev *octnet_pci_dev;
 static int octnet_num_device;
 static int octboot_net_init_done[8];
 static int octboot_net_init_task_restart;
@@ -199,6 +198,7 @@ typedef struct {
 	struct uboot_pcinet_barmap npu_memmap_info;
 	void *bar4_addr;
 	int signature_found;
+	struct pci_dev *pdev;
 } octboot_net_device_t;
 
 octboot_net_device_t octboot_net_device[8];
@@ -377,14 +377,35 @@ static int add_octboot_net_entry(struct pci_dev *octnet_pci_dev)
 	return -1;
 }
 
+static int octboot_enable_device(struct pci_dev *pdev)
+{
+	int ret;
+
+	if (!pci_is_enabled(pdev)) {
+		ret = pci_enable_device(pdev);
+		if (ret) {
+			pr_err("Failed to enable PCI device 0x%x\n", ret);
+			return ret;
+		}
+
+		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+		if (ret) {
+			pr_err("Failed to set DMA mask on PCI device 0x%x\n", ret);
+			return ret;
+		}
+		pci_set_master(pdev);
+	}
+
+	return 0;
+}
+
 static void octboot_net_init_work(struct work_struct *work)
 {
+	struct pci_dev *octnet_pci_dev = NULL;
 	unsigned long mapped_len = 0;
-	int i, ret, entry_idx;
+	int i, entry_idx;
 
-	octnet_pci_dev = NULL;
 	octnet_num_device = 0;
-
 	while ((octnet_pci_dev = pci_get_device(vendor_id, PCI_ANY_ID, octnet_pci_dev))) {
 		if ((octnet_pci_dev->device != device_id_f95n) &&
 		    (octnet_pci_dev->device != device_id_f105n))
@@ -407,21 +428,8 @@ static void octboot_net_init_work(struct work_struct *work)
 			dev_info(&octnet_pci_dev->dev, "Device added at entry %d\n", entry_idx);
 		}
 
-		if (!pci_is_enabled(octnet_pci_dev)) {
-			ret = pci_enable_device(octnet_pci_dev);
-			if (ret) {
-				dev_info(&octnet_pci_dev->dev,
-					 "Failed to enable PCI device 0x%x\n", ret);
-				return;
-			}
-
-			ret = dma_set_mask_and_coherent(&octnet_pci_dev->dev, DMA_BIT_MASK(64));
-			if (ret) {
-				pr_err("Failed to set DMA mask on PCI device 0x%x\n", ret);
-				return;
-			}
-			pci_set_master(octnet_pci_dev);
-		}
+		if (octboot_enable_device(octnet_pci_dev))
+			return;
 
 		for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
 			octboot_net_device[entry_idx].mmio[i].start =
@@ -432,6 +440,7 @@ static void octboot_net_init_work(struct work_struct *work)
 			octboot_net_device[entry_idx].mmio[i].hw_addr =
 				ioremap(octboot_net_device[entry_idx].mmio[i].start, mapped_len);
 			octboot_net_device[entry_idx].mmio[i].done = 1;
+			octboot_net_device[entry_idx].pdev = octnet_pci_dev;
 
 			if (i == 2) {
 				octboot_net_device[entry_idx].bar4_addr =
@@ -455,6 +464,11 @@ static void octboot_net_poll(void)
 	int i;
 
 	for (i = 0; i < octnet_num_device; i++) {
+		if (!octboot_net_device[i].bar4_addr ||
+		    !octboot_net_device[i].pdev)
+			continue;
+		octboot_enable_device(octboot_net_device[i].pdev);
+
 		bar4_addr = octboot_net_device[i].bar4_addr;
 		src = bar4_addr + offset;
 
