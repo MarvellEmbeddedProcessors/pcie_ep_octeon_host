@@ -1603,7 +1603,11 @@ static void octep_dev_setup_task(struct work_struct *work)
 
 	if (OCTEP_TX_TSO(oct->conf->fw_info.tx_ol_flags)) {
 		netdev->hw_features |= NETIF_F_TSO;
+#if defined(NO_SET_GSO_API)
+		netif_set_tso_max_size(netdev, netdev->max_mtu);
+#else
 		netif_set_gso_max_size(netdev, netdev->max_mtu);
+#endif
 	}
 
 	netdev->features |= netdev->hw_features;

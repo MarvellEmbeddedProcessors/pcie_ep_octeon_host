@@ -13,6 +13,9 @@
 #if defined(RHEL_RELEASE_CODE)
 #if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,4))
 #define TX_TIMEOUT_HAS_TXQ_ARG 1
+#if (RHEL_RELEASE_VERSION(9, 0) <= RHEL_RELEASE_CODE)
+#define NO_SET_GSO_API
+#endif
 #if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(9,2))
 #define NAPI_ADD_HAS_BUDGET_ARG 0
 #else
@@ -53,6 +56,9 @@ int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
 #ifdef CONFIG_PCIE_PTM
 int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
 #endif
+#endif
+#if KERNEL_VERSION(5, 19, 0) <= LINUX_VERSION_CODE
+#define NO_SET_GSO_API
 #endif
 #endif
 
