@@ -141,6 +141,9 @@ struct octboot_net_dev {
 #define OCTNET_HOST_GOING_DOWN           3
 #define OCTNET_HOST_FATAL                4
 
+#define HOST_RESET_STATUS_REG_OFFSET 0x2000088
+#define OCTNET_HOST_RESET_STATUS_BIT     0
+
 #define HOST_MBOX_ACK_OFFSET 0x2000090
 #define HOST_MBOX_OFFSET 0x2000098    /* Eight words at this offset */
 #define TARGET_VERSION_OFFSET 0x2000060
@@ -148,6 +151,7 @@ struct octboot_net_dev {
 
 
 #define HOST_STATUS_REG(mdev)      (mdev->bar_map + HOST_STATUS_REG_OFFSET)
+#define HOST_RESET_STATUS_REG(mdev) (mdev->bar_map + HOST_RESET_STATUS_REG_OFFSET)
 #define HOST_VERSION_REG(mdev)      (mdev->bar_map + HOST_VERSION_OFFSET)
 #define HOST_MBOX_ACK_REG(mdev)    (mdev->bar_map + HOST_MBOX_ACK_OFFSET)
 #define HOST_MBOX_MSG_REG(mdev, i)    \
@@ -210,6 +214,21 @@ static unsigned int device_id_f105n = 0xbc00;
 static uint64_t get_host_status(struct octboot_net_dev *mdev)
 {
 	return readq(HOST_STATUS_REG(mdev));
+}
+
+static void set_host_reset_status(struct octboot_net_dev *mdev, bool set)
+{
+	uint64_t val;
+
+	dev_info(&mdev->pdev->dev, "reset host status to %s", set ? "true" : "false");
+	val = readq(HOST_RESET_STATUS_REG(mdev));
+	val &= ~(1 << OCTNET_HOST_RESET_STATUS_BIT);
+	if (set)
+		val |= (set << OCTNET_HOST_RESET_STATUS_BIT);
+	dev_info(&mdev->pdev->dev,
+		 "reset host status reg 0x%llx to val 0x%llx",
+		 (uint64_t)HOST_RESET_STATUS_REG(mdev), val);
+	writeq(val, HOST_RESET_STATUS_REG(mdev));
 }
 
 static uint64_t get_target_status(struct octboot_net_dev *mdev)
@@ -1495,6 +1514,7 @@ static void __exit octboot_net_exit(void)
 	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
 	mutex_destroy(&mdev->mbox_lock);
 	destroy_workqueue(mdev->mgmt_wq);
+	set_host_reset_status(mdev, true);
 	unregister_netdev(mdev->ndev);
 	teardown_mdev_resources(mdev);
 	free_netdev(mdev->ndev);
