@@ -1435,7 +1435,8 @@ static void mgmt_init_work(void *bar4_addr, int index)
 	}
 	/* we support only single queue at this time */
 	ndev = alloc_netdev(sizeof(struct octboot_net_dev),
-			OCTBOOT_IFACE_NAME, index, ether_setup);
+			    OCTBOOT_IFACE_NAME, NET_NAME_UNKNOWN, ether_setup);
+
 
 	if (!ndev) {
 		ret = -ENOMEM;
