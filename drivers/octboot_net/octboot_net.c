@@ -44,7 +44,6 @@ static struct delayed_work octboot_net_init_task;
 static struct octboot_net_dev *gmdev[8];
 static int octnet_num_device;
 static int octboot_net_init_done[8];
-static int octboot_net_init_task_restart;
 
 static void mgmt_init_work(void *bar4_addr, int index);
 static int mdev_reinit_rings(struct octboot_net_dev *mdev);
@@ -202,6 +201,8 @@ typedef struct {
 	struct uboot_pcinet_barmap npu_memmap_info;
 	void *bar4_addr;
 	int signature_found;
+	bool unavailable;
+	bool enabled;
 	struct pci_dev *pdev;
 } octboot_net_device_t;
 
@@ -307,8 +308,13 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 	mutex_lock(&mdev->mbox_lock);
 	msg->words[0] = readq(TARGET_MBOX_MSG_REG(mdev, 0));
 	if (msg->s.hdr.opcode == OCTBOOT_NET_MBOX_OPCODE_INVALID) {
-		netdev_err(mdev->ndev, "Async or Sync reset of 95N\n");
 		ret = 0;
+
+		/* If restart was already set, do not repeat process */
+		if (mdev->octboot_net_restart)
+			return ret;
+
+		netdev_err(mdev->ndev, "Async or Sync reset of Octeon device\n");
 		mutex_unlock(&mdev->mbox_lock);
 		mdev->octboot_net_restart = true;
 		/* set netdevice down */
@@ -393,27 +399,90 @@ static int add_octboot_net_entry(struct pci_dev *octnet_pci_dev)
 			return i;
 		}
 	}
-	return -1;
+	dev_err(&octnet_pci_dev->dev, "Error: exceeded max devices supported\n");
+	return -ENOSPC;
 }
 
-static int octboot_enable_device(struct pci_dev *pdev)
+static bool octboot_is_pci_bar_addr_reset(struct pci_dev *pdev)
 {
-	int ret;
+	uint32_t bar0_base, bar1_base;
 
-	if (!pci_is_enabled(pdev)) {
-		ret = pci_enable_device(pdev);
-		if (ret) {
-			pr_err("Failed to enable PCI device 0x%x\n", ret);
-			return ret;
-		}
+	pci_read_config_dword(pdev, PCI_BASE_ADDRESS_0, &bar0_base);
+	pci_read_config_dword(pdev, PCI_BASE_ADDRESS_1, &bar1_base);
+	if (!(bar0_base >> 16) && !bar1_base)
+		return true;
 
-		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
-		if (ret) {
-			pr_err("Failed to set DMA mask on PCI device 0x%x\n", ret);
-			return ret;
-		}
-		pci_set_master(pdev);
+	return false;
+}
+
+static bool octboot_is_pci_bar_accessible(octboot_net_device_t *octboot_dev)
+{
+	struct pci_dev *pdev = octboot_dev->pdev;
+	uint64_t addr, signature;
+
+	addr = (uint64_t)(octboot_dev->bar4_addr + SIGNATURE_OFFSET);
+	signature = *(uint64_t *)addr;
+	dev_info(&pdev->dev, "signature offset=0x%llx signature=0x%llx\n", addr, signature);
+	/* all F's means BAR not accessible */
+	return (*(uint64_t *)addr != -1ULL);
+}
+
+static int octboot_enable_device(octboot_net_device_t *octboot_dev)
+{
+	struct pci_dev *pdev;
+	int i, ret = 0;
+
+	pdev = octboot_dev->pdev;
+
+	if (octboot_is_pci_bar_addr_reset(pdev)) {
+		/* device was earlier not available; might be going through reset.
+		 * now available; restore the config.
+		 */
+		dev_info(&pdev->dev, "Device available but BAR addr is reset; restore config\n");
+		pci_restore_state(pdev);
+		octboot_dev->unavailable = false;
 	}
+
+	if (!pci_device_is_present(pdev) ||
+	    (octboot_dev->bar4_addr && !octboot_is_pci_bar_accessible(octboot_dev))) {
+		/* Device unavailable; may be going through reset */
+		if (octboot_dev->enabled && !octboot_dev->unavailable) {
+			dev_info(&pdev->dev, "Device became unavailable\n");
+			octboot_dev->unavailable = true;
+		}
+		return -EAGAIN;
+	}
+
+	/* Enable the device only once; later just call restore state */
+	if (octboot_dev->enabled)
+		return 0;
+
+	dev_info(&pdev->dev, "enabling device ...\n");
+	ret = pci_enable_device(pdev);
+	if (ret) {
+		pr_err("Failed to enable PCI device 0x%x\n", ret);
+		return ret;
+	}
+
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (ret) {
+		pr_err("Failed to set DMA mask on PCI device 0x%x\n", ret);
+		return ret;
+	}
+	pci_set_master(pdev);
+
+	for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
+		octboot_dev->mmio[i].start = pci_resource_start(pdev, i * 2);
+		octboot_dev->mmio[i].len = pci_resource_len(pdev, i * 2);
+		octboot_dev->mmio[i].hw_addr = ioremap(octboot_dev->mmio[i].start,
+						       octboot_dev->mmio[i].len);
+		octboot_dev->mmio[i].done = 1;
+
+		if (i == 2)
+			octboot_dev->bar4_addr = octboot_dev->mmio[i].hw_addr;
+	}
+	octboot_dev->enabled = true;
+	octboot_dev->signature_found = false;
 
 	return 0;
 }
@@ -421,8 +490,7 @@ static int octboot_enable_device(struct pci_dev *pdev)
 static void octboot_net_init_work(struct work_struct *work)
 {
 	struct pci_dev *octnet_pci_dev = NULL;
-	unsigned long mapped_len = 0;
-	int i, entry_idx;
+	int entry_idx, ret;
 
 	octnet_num_device = 0;
 	while ((octnet_pci_dev = pci_get_device(vendor_id, PCI_ANY_ID, octnet_pci_dev))) {
@@ -438,35 +506,20 @@ static void octboot_net_init_work(struct work_struct *work)
 		if (entry_idx == -1) {
 			entry_idx = add_octboot_net_entry(octnet_pci_dev);
 
-			if (entry_idx == -1) {
-				dev_info(&octnet_pci_dev->dev,
-					 "PCI device entry not added to table\n");
-				return;
+			if (entry_idx == -ENOSPC) {
+				dev_info(&octnet_pci_dev->dev, "Ignoring this device\n");
+				continue;
 			}
 
 			dev_info(&octnet_pci_dev->dev, "Device added at entry %d\n", entry_idx);
 		}
 
-		if (octboot_enable_device(octnet_pci_dev))
-			return;
-
-		for (i = 0; i < DEVICE_COUNT_RESOURCE; i++) {
-			octboot_net_device[entry_idx].mmio[i].start =
-				pci_resource_start(octnet_pci_dev, i * 2);
-			octboot_net_device[entry_idx].mmio[i].len =
-				pci_resource_len(octnet_pci_dev, i * 2);
-			mapped_len = octboot_net_device[entry_idx].mmio[i].len;
-			octboot_net_device[entry_idx].mmio[i].hw_addr =
-				ioremap(octboot_net_device[entry_idx].mmio[i].start, mapped_len);
-			octboot_net_device[entry_idx].mmio[i].done = 1;
-			octboot_net_device[entry_idx].pdev = octnet_pci_dev;
-
-			if (i == 2) {
-				octboot_net_device[entry_idx].bar4_addr =
-					octboot_net_device[entry_idx].mmio[i].hw_addr;
-			}
-		}
+		octboot_net_device[entry_idx].pdev = octnet_pci_dev;
 		octnet_num_device++;
+
+		ret = octboot_enable_device(&octboot_net_device[entry_idx]);
+		if (ret)
+			dev_dbg(&octnet_pci_dev->dev, "Failed to enable device; ret=%d\n", ret);
 	}
 
 	octboot_net_poll();
@@ -484,9 +537,9 @@ static void octboot_net_poll(void)
 
 	for (i = 0; i < octnet_num_device; i++) {
 		if (!octboot_net_device[i].bar4_addr ||
-		    !octboot_net_device[i].pdev)
+		    !octboot_net_device[i].pdev ||
+		    octboot_net_device[i].unavailable)
 			continue;
-		octboot_enable_device(octboot_net_device[i].pdev);
 
 		bar4_addr = octboot_net_device[i].bar4_addr;
 		src = bar4_addr + offset;
@@ -494,28 +547,33 @@ static void octboot_net_poll(void)
 		octnet_pci_device = octboot_struct[i].octnet_pci_dev_arr;
 		memcpy(&octboot_net_device[i].npu_memmap_info, src,
 			sizeof(struct uboot_pcinet_barmap));
-		signature = octboot_net_device[i].npu_memmap_info.signature;
+
 		/* Check for signature */
+		signature = octboot_net_device[i].npu_memmap_info.signature;
 		if (signature == NPU_HANDSHAKE_SIGNATURE) {
-			/* Uboot is booting and requires a netdevice for tftp */
-			if (!octboot_net_device[i].signature_found)
+			if (!octboot_net_device[i].signature_found) {
+				/* Uboot is booting and requires a netdevice for tftp */
 				dev_info(&octnet_pci_device->dev,
 					 "[Device-%d] Found valid signature 0x%llx\n",
 					 i, signature);
-			octboot_net_device[i].signature_found = true;
-		} else {
-			if (octboot_net_device[i].signature_found)
-				dev_info(&octnet_pci_device->dev,
-					 "[Device-%d] Found invalid signature 0x%llx\n",
-					 i, signature);
+				octboot_net_device[i].signature_found = true;
+				octboot_net_device[i].unavailable = false;
+
+				/* Save state for future restoration */
+				dev_info(&octnet_pci_device->dev, "saving pci state ...\n");
+				pci_save_state(octnet_pci_device);
+			}
+		} else if (octboot_net_device[i].signature_found) {
+			dev_info(&octnet_pci_device->dev,
+				 "[Device-%d] Found invalid signature 0x%llx\n", i, signature);
 			octboot_net_device[i].signature_found = false;
+			octboot_net_device[i].unavailable = true;
 		}
 	}
-	
+
 	/* Now that we have the signature, the next step is to create a
 	 * netdevice
-	 * */
-
+	 */
 	for (i = 0; i < octnet_num_device; i++) {
 		if ((octboot_net_device[i].signature_found == true) &&
 						!mgmt_init_start[i]) {
@@ -524,46 +582,49 @@ static void octboot_net_poll(void)
 			mgmt_init_start[i] = 1;
 		}
 		if ((octboot_net_device[i].signature_found == true) &&
-			(mgmt_init_start[i]) &&
-			octboot_net_init_done[i]) {
-				struct octboot_net_dev *mdev = gmdev[i];
-				int ret;
-		/* This is restart */
-		if (mdev->octboot_net_restart == true) {
-			unsigned int flags;
+				(mgmt_init_start[i]) &&
+				octboot_net_init_done[i]) {
+			struct octboot_net_dev *mdev = gmdev[i];
+			int ret;
 
-			netdev_err(mdev->ndev, "This is restart of mgmt service task\n");
-			change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
-			netif_carrier_off(mdev->ndev);
-			napi_synchronize(&mdev->rxq[0].napi);
-			ret = mdev_reinit_rings(mdev);
-			if (ret) {
-				netdev_err(mdev->ndev, "restart of mgmt service task failed\n");
-				netdev_err(mdev->ndev, "Please unload and load octboot_net module\n");
-				change_host_status(mdev, OCTNET_HOST_FATAL, false);
-				return;
+			/* This is restart */
+			if (mdev->octboot_net_restart == true) {
+				unsigned int flags;
+
+				netdev_err(mdev->ndev, "This is restart of mgmt service task\n");
+				change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
+				netif_carrier_off(mdev->ndev);
+				napi_synchronize(&mdev->rxq[0].napi);
+				ret = mdev_reinit_rings(mdev);
+				if (ret) {
+					netdev_err(mdev->ndev,
+						   "restart of mgmt service task failed\n");
+					netdev_err(mdev->ndev,
+						   "Please unload and load octboot_net module\n");
+					change_host_status(mdev, OCTNET_HOST_FATAL, false);
+					return;
+				}
+				change_host_status(mdev, OCTNET_HOST_READY, false);
+				/* barrier to ensure the octboot_net_task thread  reads the
+				 * updated flag
+				 */
+				flags = READ_ONCE(mdev->ndev->flags);
+				flags |= IFF_RUNNING;
+				WRITE_ONCE(mdev->ndev->flags, flags);
+				mdev->octboot_net_restart = false;
+				queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
+						usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 			}
-			change_host_status(mdev, OCTNET_HOST_READY, false);
-			/* barrier to ensure the octboot_net_task thread  reads the updated flag */
-			flags = READ_ONCE(mdev->ndev->flags);
-			flags |= IFF_RUNNING;
-			WRITE_ONCE(mdev->ndev->flags, flags);
-			mdev->octboot_net_restart = false;
-			queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
-			usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
-		}
 		}
 	}
 
 	for (i = 0; i < octnet_num_device; i++) {
 		if (octboot_net_device[i].signature_found == false) {
-			octboot_net_init_task_restart = true;
 			queue_delayed_work(octboot_net_init_wq, &octboot_net_init_task,
 				OCTBOOT_NET_INIT_WQ_DELAY);
 			return;
 		}
 	}
-
 }
 
 static int octboot_net_open(struct net_device *dev)
@@ -1518,6 +1579,7 @@ static void __exit octboot_net_exit(void)
 	unregister_netdev(mdev->ndev);
 	teardown_mdev_resources(mdev);
 	free_netdev(mdev->ndev);
+	pci_disable_device(mdev->pdev);
 	gmdev[i] = NULL;
 	}
 }
