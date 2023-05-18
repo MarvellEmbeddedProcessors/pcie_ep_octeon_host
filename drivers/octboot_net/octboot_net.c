@@ -229,6 +229,7 @@ static unsigned int vendor_id = 0x177d;
 static unsigned int device_id_f95n = 0xb400;
 static unsigned int device_id_f105n = 0xbc00;
 
+
 bool is_flr_inprogress(int index)
 {
 	int status;
