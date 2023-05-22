@@ -422,7 +422,8 @@ static bool octboot_is_pci_bar_accessible(octboot_net_device_t *octboot_dev)
 
 	addr = (uint64_t)(octboot_dev->bar4_addr + SIGNATURE_OFFSET);
 	signature = *(uint64_t *)addr;
-	dev_info(&pdev->dev, "signature offset=0x%llx signature=0x%llx\n", addr, signature);
+	dev_dbg(&pdev->dev, "signature offset=0x%llx signature=0x%llx\n", addr, signature);
+
 	/* all F's means BAR not accessible */
 	return (*(uint64_t *)addr != -1ULL);
 }
@@ -571,6 +572,7 @@ static void octboot_net_poll(void)
 				pci_save_state(octnet_pci_device);
 			}
 		} else if (octboot_net_device[i].signature_found) {
+			/* earlier valid signature found, but now read invalid signature */
 			dev_info(&octnet_pci_device->dev,
 				 "[Device-%d] Found invalid signature 0x%llx\n", i, signature);
 			octboot_net_device[i].signature_found = false;
