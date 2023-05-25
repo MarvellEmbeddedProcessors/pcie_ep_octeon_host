@@ -440,7 +440,6 @@ static int octboot_enable_device(octboot_net_device_t *octboot_dev)
 		 */
 		dev_info(&pdev->dev, "Device available but BAR addr is reset; restore config\n");
 		pci_restore_state(pdev);
-		octboot_dev->unavailable = false;
 	}
 
 	if (!pci_device_is_present(pdev) ||
@@ -449,8 +448,16 @@ static int octboot_enable_device(octboot_net_device_t *octboot_dev)
 		if (octboot_dev->enabled && !octboot_dev->unavailable) {
 			dev_info(&pdev->dev, "Device became unavailable\n");
 			octboot_dev->unavailable = true;
+			/* once device is unavailable, signature cannot be found */
+			octboot_dev->signature_found = false;
 		}
 		return -EAGAIN;
+	}
+
+	/* If earlier unavailable, reset state to available */
+	if (octboot_dev->unavailable) {
+		dev_info(&pdev->dev, "Device became available\n");
+		octboot_dev->unavailable = false;
 	}
 
 	/* Enable the device only once; later just call restore state */
