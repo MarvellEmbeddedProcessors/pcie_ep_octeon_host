@@ -13,6 +13,11 @@ Known Issues
 Change Logs
 -----------
 
+v23.05
+~~~~~
+- octboot_net: fix issues around mulitple card reset
+- octeon_ep: Add checksum and tso offload commands for pf and vf
+
 v23.04
 ~~~~~
 - Initial release of host drivers
