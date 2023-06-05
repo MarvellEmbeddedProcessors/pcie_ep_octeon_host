@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2020 Marvell.
 
+KVER=
+ifeq ($(KVER),)
+  KVER=$(shell uname -r)
+endif
+
 export CONFIG_OCTEON_EP=m
 export CONFIG_OCTEON_EP_VF=m
 
@@ -14,9 +19,9 @@ SUBDIRS+=apps/cnxk_ep_bb_pf
 
 all: $(SUBDIRS)
 		for d in $(SUBDIRS); do \
-				if test -d $$d; then $(MAKE) -s -C $$d || exit 1; fi; \
+				if test -d $$d; then $(MAKE) -s -C $$d KVER=$(KVER) || exit 1; fi; \
 		done
 clean:
 		for d in $(SUBDIRS); do \
-				if test -d $$d; then  $(MAKE) -s -C $$d $@ || exit 1; fi; \
+				if test -d $$d; then  $(MAKE) -s -C $$d $@ KVER=$(KVER) || exit 1; fi; \
 		done

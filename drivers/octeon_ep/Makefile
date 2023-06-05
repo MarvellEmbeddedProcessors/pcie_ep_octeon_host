@@ -1,17 +1,62 @@
 # SPDX-License-Identifier: GPL-2.0
-#
-# Network driver for Marvell's Octeon PCI Endpoint NIC
-#
+# Copyright (C) 2020 Marvell.
 
-obj-$(CONFIG_OCTEON_EP) += octeon_ep.o
+KVER=
+ifeq ($(KVER),)
+  KVER=$(shell uname -r)
+endif
 
-octeon_ep-y := octep_main.o octep_cn9k_pf.o octep_tx.o octep_rx.o \
-	       octep_ethtool.o octep_ctrl_mbox.o octep_ctrl_net.o \
-	       octep_pfvf_mbox.o octep_cnxk_pf.o
+LINUX=/lib/modules/$(KVER)/build
+ifeq ($(shell ls /lib/modules/$(KVER)/source > /dev/null 2>&1 && echo source),)
+  LINUXSRC=$(LINUX)
+else
+  LINUXSRC=/lib/modules/$(KVER)/source
+endif
 
-KERNEL_DIR ?= /lib/modules/$(shell uname -r)/build
+KDIR ?= $(srctree)
+ifneq ($(KDIR),)
+  LINUX=$(KDIR)
+  LINUXSRC=$(LINUX)
+endif
+
+OCT_DRIVER := octeon_ep
+OCT_INSTALL_DIR=/lib/modules/$(KVER)/updates/drivers/net/ethernet/marvell/$(OCT_DRIVER)
+
+override EXTRA_CFLAGS += -Werror -Wno-error=unused-variable -Wno-error=unused-function -I$(shell pwd)/include
+
+cflags-y += $(EXTRA_CFLAGS)
+
+OCT_MODULE = $(OCT_DRIVER).ko
+
+ifneq ($(KERNELRELEASE),)
+
+obj-$(CONFIG_OCTEON_EP) += $(OCT_DRIVER).o
+$(OCT_DRIVER)-y := octep_main.o octep_cn9k_pf.o octep_tx.o octep_rx.o \
+		   octep_ethtool.o octep_ctrl_mbox.o octep_ctrl_net.o \
+		   octep_pfvf_mbox.o octep_cnxk_pf.o
+
+else
+
 all:
-	make -C $(KERNEL_DIR) M=`pwd` modules
+	make -C $(LINUX) M=$(shell pwd) modules EXTRA_CFLAGS="$(EXTRA_CFLAGS)"
+
+modules_install:
+	$(MAKE) -C $(LINUXSRC) M=$(shell pwd) modules_install
+
+endif
+
+install: all
+	@if [ "$(KDIR)" != "" ]; then \
+	echo "Cannot use install with KDIR option"; exit 2;\
+	fi
+	mkdir -p $(PREFIX)$(OCT_INSTALL_DIR);
+	install -m 444 $(OCT_MODULE) $(PREFIX)$(OCT_INSTALL_DIR);
+	@if [ "$(PREFIX)" = "" ]; then /sbin/depmod -a ;\
+	else echo " *** Run '/sbin/depmod -a' to update the module database.";\
+	fi
+
+.PHONEY: all clean install
 
 clean:
-	make -C $(KERNEL_DIR) M=`pwd` clean
+	-rm -f *.tar.gz *.ko *.o *.mod.c *.mod.o .*.*.cmd *.cmd *.markers *.order *.symvers
+	-rm -rf .tmp_versions
