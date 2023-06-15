@@ -1524,7 +1524,8 @@ static bool get_fw_ready_status(struct octep_device *oct)
 
 		pci_read_config_byte(oct->pdev, (pos + 8), &status);
 		dev_info(&oct->pdev->dev, "Firmware ready status = %u\n", status);
-		return status ? true : false;
+#define FW_STATUS_READY 1ULL
+		return (status == FW_STATUS_READY) ? true : false;
 	}
 	return false;
 }
