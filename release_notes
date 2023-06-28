@@ -13,6 +13,10 @@ Known Issues
 Change Logs
 -----------
 
+v23.06
+~~~~~
+- octboot_net: mark state transitions more accurately
+
 v23.05
 ~~~~~
 - octboot_net: fix issues around mulitple card reset
