@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2020 Marvell.
 
-KVER=
+KVER?=
 ifeq ($(KVER),)
   KVER=$(shell uname -r)
 endif
