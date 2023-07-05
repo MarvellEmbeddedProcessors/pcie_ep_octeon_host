@@ -751,7 +751,9 @@ static u32 octep_update_iq_read_index_cn93_pf(struct octep_iq *iq)
 
 	if (unlikely(pkt_in_done == 0xFFFFFFFF)) {
 		last_done = 0;
-		dev_emerg(iq->dev, "IQ-%u count read failure\n", iq->q_no);
+		if (printk_ratelimit()) {
+			dev_err(iq->dev, "IQ-%u count read failure\n", iq->q_no);
+		}
 	} else {
 		last_done = pkt_in_done - iq->pkt_in_done;
 		iq->pkt_in_done = pkt_in_done;

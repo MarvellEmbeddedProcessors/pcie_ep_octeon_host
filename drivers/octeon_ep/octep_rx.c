@@ -320,8 +320,11 @@ static int octep_oq_check_hw_for_pkts(struct octep_device *oct,
 
 	pkt_count = readl(oq->pkts_sent_reg);
 	if (unlikely(pkt_count == 0xFFFFFFFF)) {
+		writel(pkt_count, oq->pkts_sent_reg);
 		pkt_count = 0;
-		dev_emerg(oq->dev, "OQ-%u count read failure\n", oq->q_no);
+		if (printk_ratelimit()) {
+			dev_err(oq->dev, "OQ-%u count read failure\n", oq->q_no);
+		}
 		return 0;
 	}
 	new_pkts = pkt_count - oq->last_pkt_count;
@@ -336,7 +339,9 @@ static int octep_oq_check_hw_for_pkts(struct octep_device *oct,
 		pkt_count = readl(oq->pkts_sent_reg);
 		if (unlikely(pkt_count == 0xFFFFFFFF)) {
 			pkt_count = 0;
-			dev_emerg(oq->dev, "OQ-%u count readback failure\n", oq->q_no);
+			if (printk_ratelimit()) {
+				dev_err(oq->dev, "OQ-%u count readback failure\n", oq->q_no);
+			}
 		}
 		new_pkts += pkt_count;
 	}
