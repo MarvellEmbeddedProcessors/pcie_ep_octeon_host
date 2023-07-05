@@ -204,6 +204,7 @@ typedef struct {
 	bool unavailable;
 	bool enabled;
 	struct pci_dev *pdev;
+	struct pci_saved_state *pci_saved_state;
 } octboot_net_device_t;
 
 octboot_net_device_t octboot_net_device[8];
@@ -440,6 +441,7 @@ static int octboot_enable_device(octboot_net_device_t *octboot_dev)
 		 * now available; restore the config.
 		 */
 		dev_info(&pdev->dev, "Device available but BAR addr is reset; restore config\n");
+		pci_load_saved_state(pdev, octboot_dev->pci_saved_state);
 		pci_restore_state(pdev);
 	}
 
@@ -570,6 +572,10 @@ static void octboot_net_poll(void)
 				/* Save state for future restoration */
 				dev_info(&octnet_pci_device->dev, "saving pci state ...\n");
 				pci_save_state(octnet_pci_device);
+				if (octboot_net_device[i].pci_saved_state != NULL)
+					kfree(octboot_net_device[i].pci_saved_state);
+				octboot_net_device[i].pci_saved_state =
+					pci_store_saved_state(octnet_pci_device);
 			}
 		} else if (octboot_net_device[i].signature_found) {
 			/* earlier valid signature found, but now read invalid signature */
@@ -1591,6 +1597,10 @@ static void __exit octboot_net_exit(void)
 	free_netdev(mdev->ndev);
 	pci_disable_device(mdev->pdev);
 	gmdev[i] = NULL;
+	if (octboot_net_device[i].pci_saved_state != NULL) {
+		kfree(octboot_net_device->pci_saved_state);
+		octboot_net_device->pci_saved_state = NULL;
+	}
 	}
 }
 
