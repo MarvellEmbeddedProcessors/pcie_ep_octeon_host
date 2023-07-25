@@ -12,6 +12,10 @@ Known Issues
 
 Change Logs
 -----------
+v23.07
+- Octeon_ep: increase send mbox response timeout
+- Octeon_ep: firmware ready should explicitly test for ready value
+- Updates to makefiles to support CI
 
 v23.06
 ~~~~~
