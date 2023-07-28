@@ -213,6 +213,26 @@ static unsigned int vendor_id = 0x177d;
 static unsigned int device_id_f95n = 0xb400;
 static unsigned int device_id_f105n = 0xbc00;
 
+int reset_target(void)
+{
+	struct pci_dev *pdev = NULL;
+	int ret;
+	while ((pdev = pci_get_device(vendor_id, PCI_ANY_ID, pdev))) {
+		if ((pdev->device != device_id_f95n) &&
+		    (pdev->device != device_id_f105n))
+			continue;
+
+		dev_info(&pdev->dev, "Reset Octeon from octboot_net driver\n");
+		ret = pci_reset_function(pdev);
+		if (ret) {
+			pr_err("Reset Octeon from octboot_net driver failed:0x%x\n",
+				ret);
+			return ret;
+		}
+	}
+	return 0;
+}
+
 static uint64_t get_host_status(struct octboot_net_dev *mdev)
 {
 	return readq(HOST_STATUS_REG(mdev));
@@ -1548,6 +1568,13 @@ conf_err:
 
 static int __init octboot_net_init(void)
 {
+	int ret = reset_target();
+	if (ret) {
+		pr_err("Resetting Octeon from octboot_net driver failed:0x%x\n",
+			ret);
+		return ret;
+	}
+
 	octboot_net_init_wq = create_singlethread_workqueue("octboot_net_poll");
 	if (!octboot_net_init_wq)
 		return -ENOMEM;
