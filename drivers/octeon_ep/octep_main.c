@@ -1559,6 +1559,11 @@ static void octep_dev_setup_task(struct work_struct *work)
 				 "Stopping firmware ready work.\n");
 			return;
 		}
+		if (atomic_read(&oct->status) == OCTEP_DEV_STATUS_ALLOC) {
+			dev_info(&oct->pdev->dev,
+				 "Quitting scheduled work.\n");
+			return;
+		}
 	}
 
 	/* Do not free resources on failure. driver unload will
@@ -1837,12 +1842,196 @@ static int octep_sriov_configure(struct pci_dev *pdev, int num_vfs)
 	return octep_sriov_enable(oct, num_vfs);
 }
 
+static int octep_reset_prepare(struct pci_dev *pdev)
+{
+	struct octep_device *oct = pci_get_drvdata(pdev);
+	struct net_device *netdev = oct->netdev;
+
+	dev_info(&pdev->dev, "A Start octep_reset_prepare ...\n");
+
+	oct->poll_non_ioq_intr = false;
+	clear_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
+	smp_mb__after_atomic();
+	while (octep_drv_busy(oct))
+		msleep(20);
+	dev_info(&pdev->dev, "B Start octep_reset_prepare ...\n");
+
+	/* Stop Tx from stack */
+	netif_tx_stop_all_queues(netdev);
+	netif_carrier_off(netdev);
+	netif_tx_disable(netdev);
+
+	oct->hw_ops.disable_interrupts(oct);
+	oct->hw_ops.disable_io_queues(oct);
+	cancel_delayed_work_sync(&oct->intr_poll_task);
+	dev_info(&pdev->dev, "Done octep_reset_prepare ...\n");
+	return 0;
+}
+
+static int octep_reset_done(struct pci_dev *pdev)
+{
+	struct octep_device *oct = pci_get_drvdata(pdev);
+
+	dev_info(&pdev->dev, "Start octep_reset_done ...\n");
+
+	set_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
+	dev_info(&pdev->dev, "Done octep_reset_done ...\n");
+	return 0;
+}
+
+void octep_cleanup_aer_uncorrect_error_status(struct pci_dev *pdev)
+{
+	int pos = 0x100;
+	u32 status, mask;
+
+	pci_read_config_dword(pdev, pos + PCI_ERR_UNCOR_STATUS, &status);
+	pci_read_config_dword(pdev, pos + PCI_ERR_UNCOR_SEVER, &mask);
+	if (pdev->error_state == pci_channel_io_normal)
+		status &= ~mask;        /* Clear corresponding nonfatal bits */
+	else
+		status &= mask; /* Clear corresponding fatal bits */
+	pci_write_config_dword(pdev, pos + PCI_ERR_UNCOR_STATUS, status);
+	dev_info(&pdev->dev, "octeon_cleanup_aer_uncorrect_error_status");
+
+}
+
+/**
+ * octeon_pcie_error_detected - called when PCI error is detected
+ * @pdev: Pointer to PCI device
+ * @state: The current pci connection state
+ *
+ * This function is called after a PCI bus error affecting
+ * this device has been detected.
+ */
+pci_ers_result_t
+octep_pcie_error_detected(struct pci_dev *pdev, pci_channel_state_t state)
+{
+	struct octep_device *oct = pci_get_drvdata(pdev);
+
+	/* Non-correctable Non-fatal errors */
+	if (state == pci_channel_io_normal) {
+		dev_err(&pdev->dev, "Non-correctable non-fatal error reported.\n");
+		octep_cleanup_aer_uncorrect_error_status(oct->pdev);
+		return PCI_ERS_RESULT_CAN_RECOVER;
+	}
+	/* Non-correctable Fatal errors */
+	dev_err(&pdev->dev, "PCIe error Non-correctable FATAL reported by AER driver\n");
+	/* Always return a DISCONNECT. There is no support for recovery but only
+	 * for a clean shutdown. */
+	return PCI_ERS_RESULT_DISCONNECT;
+}
+
+pci_ers_result_t octep_pcie_mmio_enabled(struct pci_dev *pdev)
+{
+	/* We should never hit this since we never ask for a reset for a Fatal
+	 * Error. We always return DISCONNECT in io_error above. */
+	/* But play safe and return RECOVERED for now. */
+	dev_err(&pdev->dev, "octep_pcie_mmio_enabled\n");
+	return PCI_ERS_RESULT_RECOVERED;
+}
+
+/**
+ * octep_pcie_slot_reset - called after the pci bus has been reset.
+ * @pdev: Pointer to PCI device
+ *
+ * Restart the card from scratch, as if from a cold-boot. Implementation
+ * resembles the first-half of the octeon_resume routine.
+ */
+pci_ers_result_t octep_pcie_slot_reset(struct pci_dev * pdev)
+{
+	/* We should never hit this since we never ask for a reset for a Fatal
+	 * Error. We always return DISCONNECT in io_error above. */
+	/* But play safe and return RECOVERED for now. */
+	dev_err(&pdev->dev, "octep_pcie_slot_reset\n");
+	return PCI_ERS_RESULT_RECOVERED;
+}
+
+/**
+ * octep_pcie_resume - called when traffic can start flowing again.
+ * @pdev: Pointer to PCI device
+ *
+ * This callback is called when the error recovery driver tells us that
+ * its OK to resume normal operation. Implementation resembles the
+ * second-half of the octeon_resume routine.
+ */
+void octep_pcie_resume(struct pci_dev *pdev)
+{
+	dev_err(&pdev->dev, "octep_pcie_resume\n");
+	/* Nothing to be done here. */
+}
+
+/**
+ * octep_pci_error_reset_prepare - prepare device driver for pci reset
+ * @pdev: PCI device information struct
+ */
+static void octep_pci_error_reset_prepare(struct pci_dev *pdev)
+{
+	struct octep_device *oct = pci_get_drvdata(pdev);
+	int num_vfs = 0, vf_idx = 0;
+	union octep_pfvf_mbox_word notif = { 0 };
+
+	dev_info(&pdev->dev, "Reset prepare state:%ld status:%d\n",
+		 oct->state, atomic_read(&oct->status));
+
+	if (oct->state && (atomic_read(&oct->status) == OCTEP_DEV_STATUS_READY)) {
+		num_vfs = CFG_GET_ACTIVE_VFS(oct->conf);
+		dev_info(&pdev->dev, "Reset prepare num Vfs:%d\n", num_vfs);
+
+		/* Broadcast to all VF's about PF is going to initiate reset */
+		for (vf_idx = 0; vf_idx < num_vfs; vf_idx++) {
+			notif.s_link_status.opcode = OCTEP_PFVF_MBOX_NOTIF_PF_FLR;
+			notif.s_link_status.status = 0;
+			notif.s.type = OCTEP_PFVF_MBOX_TYPE_CMD;
+			octep_send_notification(oct, vf_idx, notif);
+			dev_info(&pdev->dev, "Reset prepare sent RESET to Vf:%d\n",
+				 vf_idx);
+		}
+		msleep(5);
+		octep_reset_prepare(pdev);
+	} else if (atomic_read(&oct->status) == OCTEP_DEV_STATUS_WAIT_FOR_FW) {
+		dev_info(&pdev->dev, "Reset prepare OCTEP STATUS WAIT FOR FW Started\n");
+		atomic_set(&oct->status, OCTEP_DEV_STATUS_ALLOC);
+		msleep(2);
+		cancel_work_sync(&oct->dev_setup_task);
+		dev_info(&pdev->dev, "Reset prepare OCTEP STATUS WAIT FOR FW Done\n");
+	}
+}
+
+/**
+ * octep_pci_error_reset_done - pci reset done, device driver reset can begin
+ * @pdev: PCI device information struct
+ */
+static void octep_pci_error_reset_done(struct pci_dev *pdev)
+{
+	struct octep_device *oct = pci_get_drvdata(pdev);
+
+	dev_info(&pdev->dev, "Reset done state:%ld status:%d\n",
+		 oct->state, atomic_read(&oct->status));
+
+	if (!oct->state && (atomic_read(&oct->status) == OCTEP_DEV_STATUS_READY)) {
+		octep_reset_done(pdev);
+		dev_info(&pdev->dev, "After reset done state:%ld status:%d\n",
+			 oct->state, atomic_read(&oct->status));
+	}
+}
+
+/* For PCI-E Advanced Error Recovery (AER) Interface */
+static struct pci_error_handlers octeon_err_handler = {
+	.error_detected = octep_pcie_error_detected,
+	.mmio_enabled = octep_pcie_mmio_enabled,
+	.slot_reset = octep_pcie_slot_reset,
+	.reset_prepare = octep_pci_error_reset_prepare,
+	.reset_done = octep_pci_error_reset_done,
+	.resume = octep_pcie_resume,
+};
+
 static struct pci_driver octep_driver = {
 	.name = OCTEP_DRV_NAME,
 	.id_table = octep_pci_id_tbl,
 	.probe = octep_probe,
 	.remove = octep_remove,
 	.sriov_configure = octep_sriov_configure,
+	.err_handler = &octeon_err_handler,
 };
 
 /**

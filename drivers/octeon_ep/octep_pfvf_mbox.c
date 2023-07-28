@@ -29,7 +29,9 @@
 static u32 pfvf_cmd_versions[OCTEP_PFVF_MBOX_CMD_MAX] = {
 	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1,
 	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS] =
-		OCTEP_PFVF_MBOX_VERSION_V2
+		OCTEP_PFVF_MBOX_VERSION_V2,
+	[OCTEP_PFVF_MBOX_NOTIF_PF_FLR] =
+		OCTEP_PFVF_MBOX_VERSION_V3
 };
 
 static void octep_pfvf_validate_version(struct octep_device *oct,  u32 vf_id,
@@ -98,7 +100,7 @@ static void octep_pfvf_set_rx_state(struct octep_device *oct, u32 vf_id,
 	rsp->s_link_state.type = OCTEP_PFVF_MBOX_TYPE_RSP_ACK;
 }
 
-static int
+int
 octep_send_notification(struct octep_device *oct, u32 vf_id,
 			union octep_pfvf_mbox_word cmd)
 {
@@ -247,7 +249,7 @@ int octep_setup_pfvf_mbox(struct octep_device *oct)
 	int i = 0, num_vfs = 0, rings_per_vf = 0;
 	int ring = 0;
 
-	num_vfs = oct->conf->sriov_cfg.active_vfs;
+	num_vfs = oct->conf->sriov_cfg.max_vfs;
 	rings_per_vf = oct->conf->sriov_cfg.max_rings_per_vf;
 
 	for (i = 0; i < num_vfs; i++) {

@@ -236,7 +236,7 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 	conf->sriov_cfg.max_rings_per_vf = CNXK_SDP_EPF_RINFO_RPVF(val);
 	conf->sriov_cfg.active_rings_per_vf = conf->sriov_cfg.max_rings_per_vf;
 	conf->sriov_cfg.max_vfs = CNXK_SDP_EPF_RINFO_NVFS(val);
-	conf->sriov_cfg.active_vfs = conf->sriov_cfg.max_vfs;
+	conf->sriov_cfg.active_vfs = 0;
 	conf->sriov_cfg.vf_srn = CNXK_SDP_EPF_RINFO_SRN(val);
 
 	val = octep_read_csr64(oct, CNXK_SDP_MAC_PF_RING_CTL(oct->pcie_port));

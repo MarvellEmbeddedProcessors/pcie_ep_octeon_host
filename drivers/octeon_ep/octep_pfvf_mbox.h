@@ -19,9 +19,10 @@ enum octep_pfvf_mbox_version {
 	OCTEP_PFVF_MBOX_VERSION_V0,
 	OCTEP_PFVF_MBOX_VERSION_V1,
 	OCTEP_PFVF_MBOX_VERSION_V2,
+	OCTEP_PFVF_MBOX_VERSION_V3,
 };
 
-#define OCTEP_PFVF_MBOX_VERSION_CURRENT	OCTEP_PFVF_MBOX_VERSION_V2
+#define OCTEP_PFVF_MBOX_VERSION_CURRENT	OCTEP_PFVF_MBOX_VERSION_V3
 
 enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_VERSION,
@@ -38,6 +39,7 @@ enum octep_pfvf_mbox_opcode {
 	OCTEP_PFVF_MBOX_CMD_GET_FW_INFO,
 	OCTEP_PFVF_MBOX_CMD_SET_OFFLOADS,
 	OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS,
+	OCTEP_PFVF_MBOX_NOTIF_PF_FLR,
 	OCTEP_PFVF_MBOX_CMD_MAX,
 };
 
@@ -164,4 +166,6 @@ void octep_pfvf_mbox_work(struct work_struct *work);
 int octep_setup_pfvf_mbox(struct octep_device *oct);
 void octep_delete_pfvf_mbox(struct octep_device *oct);
 void octep_pfvf_notify(struct octep_device *oct, struct octep_ctrl_mbox_msg *msg);
+int octep_send_notification(struct octep_device *oct, u32 vf_id,
+			    union octep_pfvf_mbox_word cmd);
 #endif
