@@ -18,7 +18,9 @@
 static u32 pfvf_cmd_versions[OCTEP_PFVF_MBOX_CMD_MAX] = {
 	[0 ... OCTEP_PFVF_MBOX_CMD_DEV_REMOVE] = OCTEP_PFVF_MBOX_VERSION_V1,
 	[OCTEP_PFVF_MBOX_CMD_GET_FW_INFO ... OCTEP_PFVF_MBOX_NOTIF_LINK_STATUS] =
-		OCTEP_PFVF_MBOX_VERSION_V2
+		OCTEP_PFVF_MBOX_VERSION_V2,
+	[OCTEP_PFVF_MBOX_NOTIF_PF_FLR] =
+		OCTEP_PFVF_MBOX_VERSION_V3
 };
 
 int octep_vf_setup_mbox(struct octep_vf_device *oct)
@@ -105,6 +107,10 @@ void octep_vf_mbox_work(struct work_struct *work)
 			netif_carrier_off(oct->netdev);
 			dev_info(&oct->pdev->dev, "netif_carrier_off\n");
 		}
+		break;
+	case OCTEP_PFVF_MBOX_NOTIF_PF_FLR:
+		dev_info(&oct->pdev->dev, "PF FLR octep_vf_reset_prepare\n");
+		octep_vf_reset_prepare(oct->pdev);
 		break;
 	default:
 		dev_err(&oct->pdev->dev,

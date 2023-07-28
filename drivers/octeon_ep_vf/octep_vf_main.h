@@ -337,4 +337,5 @@ void octep_vf_set_ethtool_ops(struct net_device *netdev);
 int octep_vf_get_link_info(struct octep_vf_device *oct);
 int octep_vf_get_if_stats(struct octep_vf_device *oct);
 void octep_vf_mbox_work(struct work_struct *work);
+int octep_vf_reset_prepare(struct pci_dev *pdev);
 #endif /* _OCTEP_VF_MAIN_H_ */

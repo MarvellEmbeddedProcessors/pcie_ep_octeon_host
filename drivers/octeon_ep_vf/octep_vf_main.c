@@ -536,6 +536,11 @@ static int octep_vf_stop(struct net_device *netdev)
 
 	netdev_info(netdev, "Stopping the device ...\n");
 
+	if (!test_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state)) {
+		netdev_info(netdev, "Already Stopped the device by FLR\n");
+		return 0;
+	}
+
 	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
 	smp_mb__after_atomic();
 	while (octep_vf_drv_busy(oct))
@@ -564,6 +569,38 @@ static int octep_vf_stop(struct net_device *netdev)
 	octep_vf_free_oqs(oct);
 	octep_vf_free_iqs(oct);
 	netdev_info(netdev, "Device stopped !!\n");
+	return 0;
+}
+
+int octep_vf_reset_prepare(struct pci_dev *pdev)
+{
+	struct octep_vf_device *oct = pci_get_drvdata(pdev);
+	struct net_device *netdev = oct->netdev;
+
+	dev_info(&pdev->dev, "Start VF reset prepare ...\n");
+
+	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
+	smp_mb__after_atomic();
+	while (octep_vf_drv_busy(oct))
+		msleep(20);
+
+	/* Stop Tx from stack */
+	netif_tx_stop_all_queues(netdev);
+	netif_carrier_off(netdev);
+	netif_tx_disable(netdev);
+
+	oct->hw_ops.disable_interrupts(oct);
+	octep_vf_napi_disable(oct);
+	octep_vf_napi_delete(oct);
+
+	octep_vf_clean_irqs(oct);
+	octep_vf_clean_iqs(oct);
+
+	oct->hw_ops.disable_io_queues(oct);
+	oct->hw_ops.reset_io_queues(oct);
+	octep_vf_free_oqs(oct);
+	octep_vf_free_iqs(oct);
+	dev_info(&pdev->dev, "Done VF reset prepare ...\n");
 	return 0;
 }
 
@@ -1104,7 +1141,6 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_pci_regions;
 	}
 
-	pci_enable_pcie_error_reporting(pdev);
 	pci_set_master(pdev);
 
 	netdev = alloc_etherdev_mq(sizeof(struct octep_vf_device),
@@ -1199,7 +1235,6 @@ err_setup_mbox:
 err_octep_vf_config:
 	free_netdev(netdev);
 err_alloc_netdev:
-	pci_disable_pcie_error_reporting(pdev);
 	pci_release_mem_regions(pdev);
 err_pci_regions:
 err_dma_mask:
@@ -1221,6 +1256,7 @@ static void octep_vf_remove(struct pci_dev *pdev)
 	struct octep_vf_device *oct = pci_get_drvdata(pdev);
 	struct net_device *netdev;
 
+	dev_info(&pdev->dev, "octep_vf_remove\n");
 	if (!oct)
 		return;
 
@@ -1233,7 +1269,6 @@ static void octep_vf_remove(struct pci_dev *pdev)
 	octep_vf_device_cleanup(oct);
 	pci_release_mem_regions(pdev);
 	free_netdev(netdev);
-	pci_disable_pcie_error_reporting(pdev);
 	pci_disable_device(pdev);
 }
 
