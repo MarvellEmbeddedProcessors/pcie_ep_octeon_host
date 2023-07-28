@@ -27,14 +27,26 @@
 #define OCTBOOT_NET_VERSION_MAJOR 1
 #define OCTBOOT_NET_VERSION_MINOR 0
 
+/* Device status */
+enum octboot_net_status {
+        OCTBOOT_DEV_STATUS_READY,
+        OCTBOOT_DEV_STATUS_PFFLR
+};
+
+/* Task running status */
+enum octboot_task_status {
+        TASK_STATUS_RUNNING,
+};
+
 struct octboot_net_struct {
-	struct octboot_net_dev *gmdev;
+	struct octboot_net_dev *mdev;
 	struct pci_dev *octnet_pci_dev_arr;
 	int pci_bus;
 	int pci_device;
 	int pci_fn;
 	int octboot_net_init_done;
 	int initialized;
+	atomic_t flr_status;
 };
 
 static struct octboot_net_struct octboot_struct[8];
@@ -49,8 +61,9 @@ static void mgmt_init_work(void *bar4_addr, int index);
 static int mdev_reinit_rings(struct octboot_net_dev *mdev);
 static void change_host_status(struct octboot_net_dev *mdev, uint64_t status,
 			bool ack_wait);
+static int find_octboot_net_entry(struct pci_dev *octnet_pci_dev);
 static int mgmt_init_start[8];
-#define OCTBOOT_NET_INIT_WQ_DELAY (1 * HZ)
+#define OCTBOOT_NET_INIT_WQ_DELAY (2 * HZ)
 #define DEVICE_COUNT_RESOURCE 3
 
 #define OCTBOOT_NET_MBOX_SIZE_WORDS 8
@@ -99,7 +112,8 @@ struct uboot_pcinet_barmap {
 #define OCTBOOT_NET_DESCQ_READY 1
 #define OCTBOOT_IFACE_NAME "octboot_net%d"
 #define OCTBOOT_NET_NUM_ELEMENTS 256
-#define OCTBOOT_NET_SERVICE_TASK_US 1000
+#define OCTBOOT_NET_SERVICE_TASK_US 1000 // 1msec
+#define OCTBOOT_NET_SERVICE_TASK_US_FLR 6000000 // 6sec
 
 
 struct octboot_net_dev {
@@ -127,6 +141,8 @@ struct octboot_net_dev {
 	uint32_t recv_mbox_id;
 	int      octboot_net_restart;
 	uint8_t hw_addr[ETH_ALEN];
+	unsigned long task_status;
+	uint32_t task_run_poll_cnt;
 };
 
 #define NPU_HANDSHAKE_SIGNATURE 0xABCDABCD
@@ -213,6 +229,120 @@ static unsigned int vendor_id = 0x177d;
 static unsigned int device_id_f95n = 0xb400;
 static unsigned int device_id_f105n = 0xbc00;
 
+bool is_flr_inprogress(int index)
+{
+	int status;
+	if ((octboot_struct[index].octboot_net_init_done) && (octboot_struct[index].mdev)) {
+		status = atomic_read(&octboot_struct[index].flr_status);
+		if (status == OCTBOOT_DEV_STATUS_PFFLR) {
+			dev_info(&(octboot_struct[index].octnet_pci_dev_arr)->dev,
+				 "Device is in PFFLR State in init_task (devid=0x%x)\n",
+				  octboot_struct[index].octnet_pci_dev_arr->device);
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool octboot_net_task_busy(struct octboot_net_dev *mdev)
+{
+	return test_bit(TASK_STATUS_RUNNING, &mdev->task_status);
+}
+
+static int octboot_reset_prepare(struct device *dev)
+{
+	int index;
+	struct octboot_net_dev *mdev;
+	struct pci_dev *pdev = to_pci_dev(dev);
+
+	dev_info(&pdev->dev, "octboot_reset_prepare start\n");
+	/* octboot_net_entry from pci dev */
+	index = find_octboot_net_entry(pdev);
+	if ((index != -1) && (octboot_struct[index].octboot_net_init_done) &&
+	    (octboot_struct[index].mdev)) {
+		atomic_set(&octboot_struct[index].flr_status, OCTBOOT_DEV_STATUS_PFFLR);
+		dev_info(&pdev->dev, "octboot_reset_prepare Set PFFLR index:%d\n", index);
+		mdev = octboot_struct[index].mdev;
+		mdev->admin_up = false;
+		/* set netdevice down */
+		netif_carrier_off(mdev->ndev);
+		dev_info(&pdev->dev, "octboot_reset_prepare netif_carrier_off index:%d\n", index);
+		napi_synchronize(&mdev->rxq[0].napi);
+		napi_disable(&mdev->rxq[0].napi);
+		dev_info(&pdev->dev, "octboot_reset_prepare napi_synchronize\n");
+
+	} else {
+		dev_err(&pdev->dev, "octboot_reset_prepare octboot net device is not yet setup\n");
+		return -1;
+	}
+	dev_info(&pdev->dev, "Net Task status:%x octboot_reset_prepare\n",
+		 test_bit(TASK_STATUS_RUNNING, &mdev->task_status));
+	if (test_bit(TASK_STATUS_RUNNING, &mdev->task_status))
+	{
+		mdev->task_run_poll_cnt = 0;
+		while (octboot_net_task_busy(mdev)) {
+			mdev->task_run_poll_cnt++;
+			 msleep(20);
+			 if (mdev->task_run_poll_cnt == 100) {
+				dev_err(&pdev->dev,
+					"octboot_reset_prepare task run poll cnt reached 100 times\n");
+				break;
+			 }
+		}
+	}
+	dev_info(&pdev->dev, "octboot_reset_prepare mdev->task_run_poll_cnt:%d\n",
+		 mdev->task_run_poll_cnt);
+	return 0;
+}
+
+static int octboot_reset_done(struct device *dev)
+{
+	int index;
+	struct octboot_net_dev *mdev;
+	struct pci_dev *pdev = to_pci_dev(dev);
+
+	dev_info(&pdev->dev, "octboot_reset_done start\n");
+	/* octboot_net_entry from pci dev */
+	index = find_octboot_net_entry(pdev);
+	if ((index != -1) && (octboot_struct[index].octboot_net_init_done) &&
+	    (octboot_struct[index].mdev)) {
+		mdev = octboot_struct[index].mdev;
+		netif_carrier_on(mdev->ndev);
+		napi_enable(&mdev->rxq[0].napi);
+		mdev->admin_up = true;
+		dev_info(&pdev->dev, "octboot_reset_done napi_synchronize index:%d\n",
+	                 index);
+
+	} else {
+		dev_err(&pdev->dev, "octboot_reset_done octboot net device is not yet setup\n");
+		return -1;
+	}
+	atomic_set(&octboot_struct[index].flr_status, OCTBOOT_DEV_STATUS_READY);
+	dev_info(&pdev->dev, "octboot_reset_done staring net_task\n");
+	queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
+				usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US_FLR));
+	dev_info(&pdev->dev, "octboot_reset_done ending net_task\n");
+	return 0;
+}
+
+static ssize_t octboot_reset_store(struct device *dev, struct device_attribute *attr,
+                           const char *buf, size_t count)
+{
+	int ret;
+	struct pci_dev *pdev = to_pci_dev(dev);
+
+	dev_info(&pdev->dev, "octboot_reset initiated\n");
+	octboot_reset_prepare(dev);
+	dev_info(&pdev->dev, "octboot_reset pci_reset_function start\n");
+	ret = pci_reset_function(pdev);
+	dev_info(&pdev->dev, "octboot_reset pci_reset_function end\n");
+	octboot_reset_done(dev);
+	dev_info(&pdev->dev, "octboot_reset done\n");
+	return count;
+}
+
+static DEVICE_ATTR(octboot_reset, 0200, NULL, octboot_reset_store);
+
 int reset_target(void)
 {
 	struct pci_dev *pdev = NULL;
@@ -229,6 +359,21 @@ int reset_target(void)
 				ret);
 			return ret;
 		}
+	}
+	while ((pdev = pci_get_device(vendor_id, PCI_ANY_ID, pdev))) {
+		if ((pdev->device != device_id_f95n) &&
+		    (pdev->device != device_id_f105n))
+			continue;
+
+		dev_info(&pdev->dev, "Creating sysfs entry\n");
+		ret = device_create_file(&pdev->dev, &dev_attr_octboot_reset);
+                if (ret) {
+			pr_err("Fail to create sysfs entry\n");
+			return ret;
+		}
+		else
+			dev_info(&pdev->dev, "Created sysfs entry successfully\n");
+
 	}
 	return 0;
 }
@@ -547,6 +692,13 @@ static void octboot_net_init_work(struct work_struct *work)
 		octboot_net_device[entry_idx].pdev = octnet_pci_dev;
 		octnet_num_device++;
 
+		if (is_flr_inprogress(entry_idx)) {
+			dev_err(&octnet_pci_dev->dev,
+				"Main device init_task Device is in PFFLR State in init_task (devid=0x%x)\n",
+				octnet_pci_dev->device);
+			continue;
+		}
+
 		ret = octboot_enable_device(&octboot_net_device[entry_idx]);
 		if (ret)
 			dev_dbg(&octnet_pci_dev->dev, "Failed to enable device; ret=%d\n", ret);
@@ -571,6 +723,12 @@ static void octboot_net_poll(void)
 		    octboot_net_device[i].unavailable)
 			continue;
 
+		octnet_pci_device = octboot_struct[i].octnet_pci_dev_arr;
+		if (is_flr_inprogress(i)) {
+			dev_err(&octnet_pci_device->dev, "Net poll Device is in PFFLR State in init_task (devid=0x%x)\n",
+				octnet_pci_device->device);
+			continue;
+		}
 		bar4_addr = octboot_net_device[i].bar4_addr;
 		src = bar4_addr + offset;
 
@@ -809,6 +967,11 @@ static bool __handle_txq_completion(struct octboot_net_dev *mdev, int q_idx, int
 
 	cons_idx = READ_ONCE(tq->local_cons_idx);
 	prod_idx =  READ_ONCE(*tq->cons_idx_shadow);
+	if (unlikely(cons_idx == 0xFFFFFFFF) || unlikely(prod_idx == 0xFFFFFFFF)) {
+		pr_err("$$$$ Tx Received All FFFFFFFF's Count:0x%x TQ mask:0x%x\n",
+			(prod_idx-cons_idx),tq->mask);
+		return false;
+	}
 	count = octboot_net_circq_depth(prod_idx, cons_idx, tq->mask);
 	if (budget && count > budget) {
 		resched = true;
@@ -933,6 +1096,11 @@ static bool __handle_rxq(struct octboot_net_dev *mdev, int q_idx, int budget, in
 
 	cons_idx = READ_ONCE(rq->local_cons_idx);
 	prod_idx =  READ_ONCE(*rq->cons_idx_shadow);
+	if (unlikely(cons_idx == 0xFFFFFFFF) || unlikely(prod_idx == 0xFFFFFFFF)) {
+		pr_err("$$$$ Rx Received All FFFFFFFF's Count:0x%x RQ mask:0x%x\n",
+			(prod_idx-cons_idx),rq->mask);
+		return false;
+	}
 	count = octboot_net_circq_depth(prod_idx,  cons_idx, rq->mask);
 	if (!count)
 		return false;
@@ -1384,10 +1552,22 @@ static void octboot_net_task(struct work_struct *work)
 	union octboot_net_mbox_msg msg;
 	struct octboot_net_dev *mdev;
 	int ret;
-	int q_num = 0;
+	int q_num = 0, index;
 
 	mdev = (struct octboot_net_dev *)container_of(delayed_work,
 			struct octboot_net_dev, service_task);
+	set_bit(TASK_STATUS_RUNNING, &mdev->task_status);
+	smp_mb__after_atomic();
+	index = find_octboot_net_entry(mdev->pdev);
+	if ((index >= 0) && is_flr_inprogress(index)) {
+		dev_err(&(mdev->pdev)->dev, "net_task: In PFFLR State (devid=0x%x)\n",
+			mdev->pdev->device);
+		clear_bit(TASK_STATUS_RUNNING, &mdev->task_status);
+		smp_mb__after_atomic();
+		dev_err(&(mdev->pdev)->dev, "net_task: In PFFLR State (devid=0x%x) BIT:%x\n",
+			mdev->pdev->device, test_bit(TASK_STATUS_RUNNING, &mdev->task_status));
+		return;
+	}
 	ret = mbox_check_msg_rcvd(mdev, &msg);
 	if (!ret) {
 		switch (msg.s.hdr.opcode) {
@@ -1412,6 +1592,14 @@ static void octboot_net_task(struct work_struct *work)
 
 		__handle_rxq(mdev, q_num, 0, 1);
 		spin_unlock_bh(&mdev->rxq[q_num].lock);
+	}
+	index = find_octboot_net_entry(mdev->pdev);
+	if ((index >= 0) && is_flr_inprogress(index)) {
+		dev_err(&(mdev->pdev)->dev, "net_task:End in PFFLR State (devid=0x%x)\n",
+			mdev->pdev->device);
+		clear_bit(TASK_STATUS_RUNNING, &mdev->task_status);
+		smp_mb__after_atomic();
+		return;
 	}
 	queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
 		usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
@@ -1531,6 +1719,8 @@ static void mgmt_init_work(void *bar4_addr, int index)
 	queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
 		   usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 	gmdev[index] = mdev;
+	octboot_struct[index].mdev = mdev;
+	octboot_struct[index].octboot_net_init_done = 1;
 	octboot_net_init_done[index] = 1;
 	host_version = ((OCTBOOT_NET_VERSION_MAJOR << 8)|OCTBOOT_NET_VERSION_MINOR);
 	writeq(host_version, HOST_VERSION_REG(mdev));
@@ -1601,7 +1791,7 @@ static void __exit octboot_net_exit(void)
 	struct octboot_net_dev *mdev;
 	int i;
 
-	cancel_delayed_work_sync(&octboot_net_init_task);
+	cancel_delayed_work(&octboot_net_init_task);
 	flush_workqueue(octboot_net_init_wq);
 	destroy_workqueue(octboot_net_init_wq);
 
@@ -1612,7 +1802,7 @@ static void __exit octboot_net_exit(void)
 	netif_carrier_off(mdev->ndev);
 	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
 	napi_synchronize(&mdev->rxq[0].napi);
-	cancel_delayed_work_sync(&mdev->service_task);
+	cancel_delayed_work(&mdev->service_task);
 	mdev_clean_rx_rings(mdev);
 	mdev_clean_tx_rings(mdev);
 	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
@@ -1621,8 +1811,9 @@ static void __exit octboot_net_exit(void)
 	set_host_reset_status(mdev, true);
 	unregister_netdev(mdev->ndev);
 	teardown_mdev_resources(mdev);
-	free_netdev(mdev->ndev);
+	device_remove_file(&(mdev->pdev)->dev, &dev_attr_octboot_reset);
 	pci_disable_device(mdev->pdev);
+	free_netdev(mdev->ndev);
 	gmdev[i] = NULL;
 	if (octboot_net_device[i].pci_saved_state != NULL) {
 		kfree(octboot_net_device->pci_saved_state);
