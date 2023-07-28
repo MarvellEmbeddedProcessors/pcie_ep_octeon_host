@@ -37,7 +37,6 @@ int octep_vf_setup_mbox(struct octep_vf_device *oct)
 	INIT_WORK(&oct->mbox->wk.work, octep_vf_mbox_work);
 	oct->mbox->wk.ctxptr = oct;
 	oct->mbox_neg_ver = OCTEP_PFVF_MBOX_VERSION_CURRENT;
-
 	dev_info(&oct->pdev->dev, "setup vf mbox successfully\n");
 	return 0;
 }
