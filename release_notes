@@ -9,10 +9,19 @@ Known Issues
 ------------
 - Only single PF per PEM is supported
 - octboot_net can intermittently fail with multiple devices
+- Remove and rescan of PF device shouldn't be done while octboot_net driver is loaded
 
 Change Logs
 -----------
+v23.08
+~~~~~
+- octboot_net: add target reset functionality
+- octboot_net: add graceful FLR support
+- octeon_ep: add graceful PF FLR support
+- octeon_ep_vf: add graceful PF FLR support
+
 v23.07
+~~~~~
 - Octeon_ep: increase send mbox response timeout
 - Octeon_ep: firmware ready should explicitly test for ready value
 - Updates to makefiles to support CI
