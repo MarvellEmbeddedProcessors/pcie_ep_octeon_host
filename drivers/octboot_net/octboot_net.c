@@ -111,6 +111,7 @@ struct uboot_pcinet_barmap {
 #define OCTBOOT_NET_DESCQ_CLEAN 0
 #define OCTBOOT_NET_DESCQ_READY 1
 #define OCTBOOT_IFACE_NAME "octboot_net%d"
+#define OCTBOOT_IFACE_NAME_SZ	15
 #define OCTBOOT_NET_NUM_ELEMENTS 256
 #define OCTBOOT_NET_SERVICE_TASK_US 1000 // 1msec
 #define OCTBOOT_NET_SERVICE_TASK_US_FLR 6000000 // 6sec
@@ -1634,6 +1635,7 @@ static void mgmt_init_work(void *bar4_addr, int index)
 	uint32_t *tq_cons_shdw_vaddr, *rq_cons_shdw_vaddr;
 	dma_addr_t tq_cons_shdw_dma, rq_cons_shdw_dma;
 	int num_txq, num_rxq, max_rxq, max_txq, ret;
+	char octboot_iface_name[OCTBOOT_IFACE_NAME_SZ];
 	struct net_device *ndev;
 	struct octboot_net_dev *mdev;
 	struct pci_dev *octnet_pci_device;
@@ -1660,11 +1662,10 @@ static void mgmt_init_work(void *bar4_addr, int index)
 		pr_err("octboot_net: dma_alloc_coherent rq failed\n");
 		goto tq_dma_free;
 	}
+	sprintf(octboot_iface_name, OCTBOOT_IFACE_NAME, find_octboot_net_entry(octnet_pci_device));
 	/* we support only single queue at this time */
 	ndev = alloc_netdev(sizeof(struct octboot_net_dev),
-			    OCTBOOT_IFACE_NAME, NET_NAME_UNKNOWN, ether_setup);
-
-
+			    octboot_iface_name, NET_NAME_USER, ether_setup);
 	if (!ndev) {
 		ret = -ENOMEM;
 		pr_err("octboot_net: alloc_netdev failed\n");
