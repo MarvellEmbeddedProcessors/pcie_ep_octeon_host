@@ -19,6 +19,7 @@ v23.08
 - octboot_net: add graceful FLR support
 - octeon_ep: add graceful PF FLR support
 - octeon_ep_vf: add graceful PF FLR support
+- octeon_ep: firmware_ready bit reset handling for CNF95
 
 v23.07
 ~~~~~
