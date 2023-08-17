@@ -478,8 +478,10 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 		ret = 0;
 
 		/* If restart was already set, do not repeat process */
-		if (mdev->octboot_net_restart)
+		if (mdev->octboot_net_restart) {
+			mutex_unlock(&mdev->mbox_lock);
 			return ret;
+		}
 
 		netdev_err(mdev->ndev, "Async or Sync reset of Octeon device\n");
 		mutex_unlock(&mdev->mbox_lock);
@@ -1602,6 +1604,7 @@ static void octboot_net_task(struct work_struct *work)
 		smp_mb__after_atomic();
 		return;
 	}
+	clear_bit(TASK_STATUS_RUNNING, &mdev->task_status);
 	queue_delayed_work(mdev->mgmt_wq, &mdev->service_task,
 		usecs_to_jiffies(OCTBOOT_NET_SERVICE_TASK_US));
 }
