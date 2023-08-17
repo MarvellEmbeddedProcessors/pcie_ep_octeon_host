@@ -600,6 +600,8 @@ int octep_vf_reset_prepare(struct pci_dev *pdev)
 	oct->hw_ops.reset_io_queues(oct);
 	octep_vf_free_oqs(oct);
 	octep_vf_free_iqs(oct);
+	if (netdev->reg_state == NETREG_REGISTERED)
+		unregister_netdev(netdev);
 	dev_info(&pdev->dev, "Done VF reset prepare ...\n");
 	return 0;
 }
