@@ -20,6 +20,8 @@ v23.08
 - octeon_ep: add graceful PF FLR support
 - octeon_ep_vf: add graceful PF FLR support
 - octeon_ep: firmware_ready bit reset handling for CNF95
+- octboot_net: Interface to be numbered based on pci entry index
+- octboot_net: Fixed asymmetric lock sequence
 
 v23.07
 ~~~~~
