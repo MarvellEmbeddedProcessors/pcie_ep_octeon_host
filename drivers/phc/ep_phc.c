@@ -633,7 +633,6 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 				oct_idx);
 			schedule_timeout_interruptible(HZ * 1);
 		}
-		goto before_exit;
 	}
 
 	atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
@@ -666,9 +665,6 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 	 * data structure to reflect this. Free the device structure.
 	 */
 	octeon_free_device_mem(oct_dev);
-
-before_exit:
-	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon device removed\n", oct_idx);
 }
 
 
