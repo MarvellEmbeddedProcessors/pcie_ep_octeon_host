@@ -618,6 +618,7 @@ int octeon_ep_phc_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 void octeon_ep_phc_remove(struct pci_dev *pdev)
 {
 	octeon_device_t *oct_dev = pci_get_drvdata(pdev);
+	bool dev_inval = false;
 	int oct_idx;
 
 	oct_idx = oct_dev->octeon_id;
@@ -626,14 +627,15 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 	if (atomic_read(&oct_dev->status) == OCT_DEV_CHECK_FW) {
 		atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
 		while (true) {
-			if (atomic_read(&oct_dev->status) == OCT_DEV_STATE_INVALID)
-				return;
+			if (atomic_read(&oct_dev->status) == OCT_DEV_STATE_INVALID) {
+				dev_inval = true;
+				break;
+			}
 
 			dev_err(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Waiting for firmware ready work to end.\n",
 				oct_idx);
 			schedule_timeout_interruptible(HZ * 1);
 		}
-		goto before_exit;
 	}
 
 	atomic_set(&oct_dev->status, OCT_DEV_STOPPING);
@@ -648,10 +650,10 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 	flush_workqueue(oct_dev->dev_init_wq.wq);
 	destroy_workqueue(oct_dev->dev_init_wq.wq);
 	oct_dev->dev_init_wq.wq = NULL;
-
+	if (dev_inval == true)
+		goto before_exit;
 
 	ptp_clock_unregister(oct_dev->oct_ep_ptp_clock->ptp_clock);
-	kfree(oct_dev->oct_ep_ptp_clock);
 
 	sysfs_remove_file(&oct_dev->phc_sysfs_kobject, &phc_ptp_attribute.attr);
 	sysfs_remove_file(&oct_dev->phc_sysfs_kobject, &phc_pcie_attribute.attr);
@@ -665,10 +667,10 @@ void octeon_ep_phc_remove(struct pci_dev *pdev)
 	/* This octeon device has been removed. Update the global
 	 * data structure to reflect this. Free the device structure.
 	 */
-	octeon_free_device_mem(oct_dev);
-
 before_exit:
 	dev_info(&oct_dev->pci_dev->dev, "OCT_PHC[%d]: Octeon device removed\n", oct_idx);
+	kfree(oct_dev->oct_ep_ptp_clock);
+	octeon_free_device_mem(oct_dev);
 }
 
 
