@@ -588,7 +588,7 @@ static void octep_enable_ioq_irq(struct octep_iq *iq, struct octep_oq *oq)
 	}
 
 	/* Flush the previous wrties before writing to RESEND bit */
-	wmb();
+	smp_wmb();
 	writeq(1UL << OCTEP_OQ_INTR_RESEND_BIT, oq->pkts_sent_reg);
 	writeq(1UL << OCTEP_IQ_INTR_RESEND_BIT, iq->inst_cnt_reg);
 }
@@ -691,6 +691,11 @@ static void octep_link_up(struct net_device *netdev)
 	netif_tx_start_all_queues(netdev);
 }
 
+static bool octep_drv_down_in_progress(struct octep_device *oct)
+{
+	return test_bit(OCTEP_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
+}
+
 /**
  * octep_open() - start the octeon network device.
  *
@@ -708,6 +713,10 @@ static int octep_open(struct net_device *netdev)
 	int err, ret;
 
 	netdev_info(netdev, "Starting netdev ...\n");
+
+	while (octep_drv_down_in_progress(oct))
+		msleep(20);
+
 	netif_carrier_off(netdev);
 
 	oct->hw_ops.reset_io_queues(oct);
@@ -749,6 +758,9 @@ static int octep_open(struct net_device *netdev)
 		octep_link_up(netdev);
 
 	set_bit(OCTEP_DEV_STATE_OPEN, &oct->state);
+
+	netdev_info(netdev, "Started netdev ...\n");
+
 	return 0;
 
 set_queues_err:
@@ -787,6 +799,9 @@ static int octep_stop(struct net_device *netdev)
 	while (octep_drv_busy(oct))
 		msleep(20);
 
+	set_bit(OCTEP_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
+	smp_mb__after_atomic();
+
 	octep_ctrl_net_set_link_status(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
 				       false);
 	octep_ctrl_net_set_rx_state(oct, OCTEP_CTRL_NET_INVALID_VFID, false,
@@ -815,6 +830,9 @@ static int octep_stop(struct net_device *netdev)
 	oct->poll_non_ioq_intr = true;
 	queue_delayed_work(octep_wq, &oct->intr_poll_task,
 			   msecs_to_jiffies(OCTEP_INTR_POLL_TIME_MSECS));
+
+	clear_bit(OCTEP_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
+	smp_mb__after_atomic();
 
 	netdev_info(netdev, "Device stopped !!\n");
 	return 0;
@@ -983,7 +1001,7 @@ static netdev_tx_t octep_start_xmit(struct sk_buff *skb,
 		return NETDEV_TX_OK;
 
 	/* Flush the hw descriptors before writing to doorbell */
-	wmb();
+	smp_wmb();
 	writel(iq->fill_cnt, iq->doorbell_reg);
 	iq->stats.instr_posted += iq->fill_cnt;
 	iq->fill_cnt = 0;

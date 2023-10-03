@@ -239,6 +239,7 @@ enum octep_dev_status {
 enum octep_dev_state {
 	OCTEP_DEV_STATE_OPEN,
 	OCTEP_DEV_STATE_READ_STATS,
+	OCTEP_DEV_STATE_DOWN_IN_PROGRESS,
 };
 
 /* The Octeon device specific private data structure.
