@@ -56,6 +56,10 @@
 #define  IQ_INSTR_PENDING(iq)  ((iq->host_write_index - iq->flush_index) & iq->ring_size_mask)
 #define  IQ_INSTR_SPACE(iq)    (iq->max_count - IQ_INSTR_PENDING(iq))
 
+#ifndef UINT64_MAX
+#define UINT64_MAX (u64)(~((u64) 0))        /* 0xFFFFFFFFFFFFFFFF */
+#endif
+
 /* PCI address space mapping information.
  * Each of the 3 address spaces given by BAR0, BAR2 and BAR4 of
  * Octeon gets mapped to different physical address spaces in
@@ -78,7 +82,7 @@ struct octep_pci_win_regs {
 
 struct octep_hw_ops {
 	void (*setup_iq_regs)(struct octep_device *oct, int q);
-	void (*setup_oq_regs)(struct octep_device *oct, int q);
+	int (*setup_oq_regs)(struct octep_device *oct, int q);
 	void (*setup_mbox_regs)(struct octep_device *oct, int mbox);
 
 	irqreturn_t (*mbox_intr_handler)(void *ioq_vector);
