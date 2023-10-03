@@ -32,6 +32,7 @@ static void octep_vf_oq_reset_indices(struct octep_vf_oq *oq)
 static int octep_vf_oq_fill_ring_buffers(struct octep_vf_oq *oq)
 {
 	struct octep_vf_oq_desc_hw *desc_ring = oq->desc_ring;
+	struct octep_vf_oq_resp_hw *resp_hw;
 	struct page *page;
 	u32 i;
 
@@ -41,6 +42,9 @@ static int octep_vf_oq_fill_ring_buffers(struct octep_vf_oq *oq)
 			dev_err(oq->dev, "Rx buffer alloc failed\n");
 			goto rx_buf_alloc_err;
 		}
+		resp_hw = page_address(page);
+		resp_hw->length = 0x0;
+
 		desc_ring[i].buffer_ptr = dma_map_page(oq->dev, page, 0,
 						       PAGE_SIZE,
 						       DMA_FROM_DEVICE);
@@ -79,6 +83,7 @@ rx_buf_alloc_err:
 static int octep_vf_oq_refill(struct octep_vf_device *oct, struct octep_vf_oq *oq)
 {
 	struct octep_vf_oq_desc_hw *desc_ring = oq->desc_ring;
+	struct octep_vf_oq_resp_hw *resp_hw;
 	struct page *page;
 	u32 refill_idx, i;
 
@@ -90,6 +95,8 @@ static int octep_vf_oq_refill(struct octep_vf_device *oct, struct octep_vf_oq *o
 			oq->stats.alloc_failures++;
 			break;
 		}
+		resp_hw = page_address(page);
+		resp_hw->length = 0x0;
 
 		desc_ring[refill_idx].buffer_ptr = dma_map_page(oq->dev, page, 0,
 								PAGE_SIZE, DMA_FROM_DEVICE);
