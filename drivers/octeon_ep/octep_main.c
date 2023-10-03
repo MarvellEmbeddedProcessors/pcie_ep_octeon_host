@@ -745,11 +745,11 @@ static int octep_open(struct net_device *netdev)
 				       false);
 	oct->poll_non_ioq_intr = false;
 
-	/* Enable the input and output queues for this Octeon device */
-	oct->hw_ops.enable_io_queues(oct);
-
 	/* Enable Octeon device interrupts */
 	oct->hw_ops.enable_interrupts(oct);
+
+	/* Enable the input and output queues for this Octeon device */
+	oct->hw_ops.enable_io_queues(oct);
 
 	octep_oq_dbell_init(oct);
 
