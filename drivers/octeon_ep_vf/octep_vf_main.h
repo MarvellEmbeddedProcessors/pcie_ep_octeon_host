@@ -202,6 +202,7 @@ struct octep_vf_iface_rxtx_stats {
 enum octep_vf_dev_state {
 	OCTEP_VF_DEV_STATE_OPEN,
 	OCTEP_VF_DEV_STATE_READ_STATS,
+	OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS,
 };
 
 struct octep_vf_fw_info {

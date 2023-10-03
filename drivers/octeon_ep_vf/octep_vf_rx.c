@@ -403,6 +403,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 		dma_unmap_page(oq->dev, oq->desc_ring[read_idx].buffer_ptr,
 			       PAGE_SIZE, DMA_FROM_DEVICE);
 		resp_hw = page_address(buff_info->page);
+		smp_rmb();
 		buff_info->page = NULL;
 
 		if(unlikely(*((volatile uint64_t *)&resp_hw->length) == 0)) {
@@ -569,7 +570,7 @@ int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget)
 		u32 desc_refilled = octep_vf_oq_refill(oct, oq);
 
 		/* flush pending writes before updating credits */
-		wmb();
+		smp_wmb();
 		writel(desc_refilled, oq->pkts_credit_reg);
 	}
 

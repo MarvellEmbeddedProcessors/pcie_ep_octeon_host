@@ -310,7 +310,7 @@ static void octep_vf_enable_ioq_irq(struct octep_vf_iq *iq, struct octep_vf_oq *
 	}
 
 	/* Flush the previous wrties before writing to RESEND bit */
-	wmb();
+	smp_wmb();
 	writeq(1UL << OCTEP_VF_OQ_INTR_RESEND_BIT, oq->pkts_sent_reg);
 	writeq(1UL << OCTEP_VF_IQ_INTR_RESEND_BIT, iq->inst_cnt_reg);
 }
@@ -444,6 +444,11 @@ static void octep_vf_set_link_status(struct octep_vf_device *oct, bool up)
 	oct->link_info.oper_up = up;
 }
 
+static bool octep_vf_drv_down_in_progress(struct octep_vf_device *oct)
+{
+	return test_bit(OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
+}
+
 /**
  * octep_vf_open() - start the octeon network device.
  *
@@ -461,6 +466,10 @@ static int octep_vf_open(struct net_device *netdev)
 	int err, ret;
 
 	netdev_info(netdev, "Starting netdev ...\n");
+
+	while (octep_vf_drv_down_in_progress(oct))
+		msleep(20);
+
 	netif_carrier_off(netdev);
 
 	oct->hw_ops.reset_io_queues(oct);
@@ -503,6 +512,8 @@ static int octep_vf_open(struct net_device *netdev)
 
 	set_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
 
+	netdev_info(netdev, "Started netdev ...\n");
+
 	return 0;
 
 set_queues_err:
@@ -541,6 +552,9 @@ static int octep_vf_stop(struct net_device *netdev)
 		return 0;
 	}
 
+	set_bit(OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
+	smp_mb__after_atomic();
+
 	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &oct->state);
 	smp_mb__after_atomic();
 	while (octep_vf_drv_busy(oct))
@@ -568,6 +582,10 @@ static int octep_vf_stop(struct net_device *netdev)
 	oct->hw_ops.reset_io_queues(oct);
 	octep_vf_free_oqs(oct);
 	octep_vf_free_iqs(oct);
+
+	clear_bit(OCTEP_VF_DEV_STATE_DOWN_IN_PROGRESS, &oct->state);
+	smp_mb__after_atomic();
+
 	netdev_info(netdev, "Device stopped !!\n");
 	return 0;
 }
@@ -768,7 +786,7 @@ static netdev_tx_t octep_vf_start_xmit(struct sk_buff *skb,
 		return NETDEV_TX_OK;
 
 	/* Flush the hw descriptors before writing to doorbell */
-	wmb();
+	smp_wmb();
 	writel(iq->fill_cnt, iq->doorbell_reg);
 	iq->stats.instr_posted += iq->fill_cnt;
 	iq->fill_cnt = 0;
