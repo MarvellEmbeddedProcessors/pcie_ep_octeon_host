@@ -498,11 +498,11 @@ static int octep_vf_open(struct net_device *netdev)
 	if (!ret)
 		octep_vf_set_link_status(oct, true);
 
-	/* Enable the input and output queues for this Octeon device */
-	oct->hw_ops.enable_io_queues(oct);
-
 	/* Enable Octeon device interrupts */
 	oct->hw_ops.enable_interrupts(oct);
+
+	/* Enable the input and output queues for this Octeon device */
+	oct->hw_ops.enable_io_queues(oct);
 
 	octep_vf_oq_dbell_init(oct);
 
