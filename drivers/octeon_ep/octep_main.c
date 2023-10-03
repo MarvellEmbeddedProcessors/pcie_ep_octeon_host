@@ -576,6 +576,9 @@ static void octep_enable_ioq_irq(struct octep_iq *iq, struct octep_oq *oq)
 {
 	u32 pkts_pend = oq->pkts_pending;
 
+	if (oq->suspend == true)
+		return;
+
 	netdev_dbg(iq->netdev, "enabling intr for Q-%u\n", iq->q_no);
 	if (iq->pkts_processed) {
 		writel(iq->pkts_processed, iq->inst_cnt_reg);
@@ -603,10 +606,21 @@ static int octep_napi_poll(struct napi_struct *napi, int budget)
 {
 	struct octep_ioq_vector *ioq_vector =
 		container_of(napi, struct octep_ioq_vector, napi);
+	struct octep_oq *oq = ioq_vector->oq;
 	u32 tx_pending, rx_done;
+
+	if (oq->suspend == true) {
+		napi_complete(napi);
+		return (budget - 1);
+	}
 
 	tx_pending = octep_iq_process_completions(ioq_vector->iq, budget);
 	rx_done = octep_oq_process_rx(ioq_vector->oq, budget);
+
+	if (oq->suspend == true) {
+		napi_complete(napi);
+		return (budget - 1);
+	}
 
 	/* need more polling if tx completion processing is still pending or
 	 * processed at least 'budget' number of rx packets.

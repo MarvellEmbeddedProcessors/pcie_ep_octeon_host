@@ -357,7 +357,7 @@ static int octep_oq_check_hw_for_pkts(struct octep_device *oct,
 	return new_pkts;
 }
 
-static void octep_oq_dump_state(struct octep_oq *oq)
+static void __maybe_unused octep_oq_dump_state(struct octep_oq *oq)
 {
 	dev_info(oq->dev, "==== OQ[%d] state ====\n", oq->q_no);
 	dev_info(oq->dev,
@@ -396,20 +396,21 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 	struct octep_rx_buffer *buff_info;
 	struct octep_oq_resp_hw *resp_hw;
 	u32 pkt, rx_bytes, desc_used;
-	struct sk_buff *skb;
 	u16 data_offset, rx_ol_flags;
-	u32 read_idx;
+	struct sk_buff *skb;
+	struct page *page;
+	u32 read_idx, i;
 
 	read_idx = oq->host_read_idx;
 	rx_bytes = 0;
 	desc_used = 0;
 	for (pkt = 0; pkt < pkts_to_process; pkt++) {
 		buff_info = (struct octep_rx_buffer *)&oq->buff_info[read_idx];
+		page = buff_info->page;
 		dma_unmap_page(oq->dev, oq->desc_ring[read_idx].buffer_ptr,
 			       PAGE_SIZE, DMA_FROM_DEVICE);
 		resp_hw = page_address(buff_info->page);
 		smp_rmb();
-		buff_info->page = NULL;
 
 		if(unlikely(*((volatile uint64_t *)&resp_hw->length) == 0)) {
 			int retry = 100;
@@ -423,27 +424,22 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 			while (retry-- && unlikely(*((volatile uint64_t *)&resp_hw->length) == 0))
 				udelay(50);
 			if (unlikely(!resp_hw->length)) {
-				dev_notice(oq->dev,
-					   "OQ[%d]: Data not available for index-%d; "
-					   "pkts_compl=%u, total_to_process=%u, pending=%u\n",
-					   oq->q_no, oq->host_read_idx,
-					   pkt, pkts_to_process, oq->pkts_pending);
-				octep_oq_dump_state(oq);
-
-				/* check if device is not responding */
-				if (readl(oq->pkts_sent_reg) == 0xFFFFFFFF) {
-					dev_err(oq->dev,
-						"OQ[%d]: device not reachable\n", oq->q_no);
-					return pkt;
+				dev_err(oq->dev, "OQ[%d]: ZERO_PKT_LEN pkt:%d SUSPENDED", oq->q_no, pkt);
+				for (i = 0; i < oct->num_oqs; i++) {
+					oct->oq[i]->suspend = true;
+					oct->hw_ops.disable_iq(oct, i);
+					oct->hw_ops.disable_oq(oct, i);
 				}
-
-				/* Zero length packet encountered; disable the queue and return */
-				oct->hw_ops.disable_oq(oct, oq->q_no);
-				oq->suspend = true;
-				dev_err(oq->dev, "OQ[%d]: suspended\n", oq->q_no);
+				oq->desc_ring[read_idx].buffer_ptr =
+					dma_map_page(oq->dev, page, 0, PAGE_SIZE, DMA_FROM_DEVICE);
+				/* Stop Tx from stack */
+				netif_tx_stop_all_queues(oct->netdev);
+				netif_carrier_off(oct->netdev);
+				netif_tx_disable(oct->netdev);
 				return pkt;
 			}
 		}
+		buff_info->page = NULL;
 
 		/* Swap the length field that is in Big-Endian to CPU */
 		buff_info->len = be64_to_cpu(resp_hw->length);
@@ -557,6 +553,9 @@ int octep_oq_process_rx(struct octep_oq *oq, int budget)
 	pkts_processed = 0;
 	total_pkts_processed = 0;
 	while (total_pkts_processed < budget) {
+		if (oq->suspend == true)
+			return 0;
+
 		 /* update pending count only when current one exhausted */
 		if (oq->pkts_pending == 0)
 			octep_oq_check_hw_for_pkts(oct, oq);
@@ -569,6 +568,8 @@ int octep_oq_process_rx(struct octep_oq *oq, int budget)
 						       pkts_available);
 		oq->pkts_pending -= pkts_processed;
 		total_pkts_processed += pkts_processed;
+		if (oq->suspend == true)
+			return 0;
 	}
 
 	if (oq->refill_count >= oq->refill_threshold) {
