@@ -29,6 +29,10 @@
 #define    CNXK_VF_SDP_R_IN_INT_LEVELS_START       0x10060
 #define    CNXK_VF_SDP_R_IN_PKT_CNT_START          0x10080
 #define    CNXK_VF_SDP_R_IN_BYTE_CNT_START         0x10090
+#define    CNXK_VF_SDP_R_ERR_TYPE_START            0x10400
+
+#define CNXK_VF_SDP_R_ERR_TYPE(ring)                 \
+	(CNXK_VF_SDP_R_ERR_TYPE_START + ((ring) * CNXK_VF_RING_OFFSET))
 
 #define    CNXK_VF_SDP_R_IN_CONTROL(ring)          \
 	(CNXK_VF_SDP_R_IN_CONTROL_START + ((ring) * CNXK_VF_RING_OFFSET))

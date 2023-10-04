@@ -164,6 +164,8 @@ static int octep_vf_setup_oq(struct octep_vf_device *oct, int q_no)
 			"Failed to allocate DMA memory for OQ-%d !!\n", q_no);
 		goto desc_dma_alloc_err;
 	}
+	dev_err(oq->dev,
+		"***** Q.No-%d desc_ring_dma:0x%llx !!\n", q_no, oq->desc_ring_dma);
 
 	oq->buff_info = (struct octep_vf_rx_buffer *)
 			vzalloc(oq->max_count * OCTEP_VF_OQ_RECVBUF_SIZE);
@@ -354,6 +356,7 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 				dev_err(oq->dev, "OQ-%u count readback failure\n", oq->q_no);
 			}
 		}
+		dev_err(oq->dev, "OQ-%u pkt_count  > 0xF0000000U\n", oq->q_no);
 		new_pkts += pkt_count;
 	}
 	oq->last_pkt_count = pkt_count;
@@ -429,6 +432,13 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 				udelay(50);
 			if (unlikely(!resp_hw->length)) {
 				dev_err(oq->dev, "OQ[%d]: ZERO_PKT_LEN pkt:%d SUSPENDED", oq->q_no, pkt);
+				dev_err(oq->dev,
+					"OQ[%d]: host_read_idx: %d; Data not available, "
+					"pkt=%u, pkt_count(pkts_to_process)=%u, pending=%u\n",
+					oq->q_no, oq->host_read_idx,
+					pkt, pkts_to_process, oq->pkts_pending);
+				oct->hw_ops.dump_OQ_registers(oct, oq->q_no);
+				octep_vf_oq_dump_state(oq);
 				for (i = 0; i < oct->num_oqs; i++) {
 					oct->oq[i]->suspend = true;
 					oct->hw_ops.disable_iq(oct, i);

@@ -75,6 +75,9 @@ static void cnxk_vf_dump_q_regs(struct octep_vf_device *oct, int qno)
 	dev_info(dev, "R[%d]_OUT_BYTE_CNT[0x%llx]: 0x%016llx\n",
 		 qno, CNXK_VF_SDP_R_OUT_BYTE_CNT(qno),
 		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_BYTE_CNT(qno)));
+	dev_info(dev, "R[%d]_ERR_TYPE[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_ERR_TYPE(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_ERR_TYPE(qno)));
 }
 
 /* Reset Hardware Tx queue */
@@ -490,6 +493,49 @@ static void octep_vf_dump_registers_cnxk(struct octep_vf_device *oct)
 		cnxk_vf_dump_q_regs(oct, q);
 }
 
+static void cnxk_vf_dump_oq_regs(struct octep_vf_device *oct, int qno)
+{
+	struct device *dev = &oct->pdev->dev;
+	dev_info(dev, "OQ-%d register dump\n", qno);
+	dev_info(dev, "R[%d]_OUT_SLIST_DBELL[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_SLIST_DBELL(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_SLIST_DBELL(qno)));
+	dev_info(dev, "R[%d]_OUT_CONTROL[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_CONTROL(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_CONTROL(qno)));
+	dev_info(dev, "R[%d]_OUT_ENABLE[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_ENABLE(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_ENABLE(qno)));
+	dev_info(dev, "R[%d]_OUT_SLIST_BADDR[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_SLIST_BADDR(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_SLIST_BADDR(qno)));
+	dev_info(dev, "R[%d]_OUT_SLIST_RSIZE[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_SLIST_RSIZE(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_SLIST_RSIZE(qno)));
+	dev_info(dev, "R[%d]_OUT_CNTS[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_CNTS(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_CNTS(qno)));
+	dev_info(dev, "R[%d]_OUT_INT_LEVELS[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_INT_LEVELS(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_INT_LEVELS(qno)));
+	dev_info(dev, "R[%d]_OUT_PKT_CNT[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_PKT_CNT(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_PKT_CNT(qno)));
+	dev_info(dev, "R[%d]_OUT_BYTE_CNT[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_OUT_BYTE_CNT(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_OUT_BYTE_CNT(qno)));
+	dev_info(dev, "R[%d]_ERR_TYPE[0x%llx]: 0x%016llx\n",
+		 qno, CNXK_VF_SDP_R_ERR_TYPE(qno),
+		 octep_vf_read_csr64(oct, CNXK_VF_SDP_R_ERR_TYPE(qno)));
+}
+
+
+/* Dump queue hardware registers (including Tx/Rx queues) for debugging. */
+static void octep_vf_dump_OQ_registers_cnxk(struct octep_vf_device *oct, int q)
+{
+	cnxk_vf_dump_oq_regs(oct, q);
+}
+
 /**
  * octep_vf_device_setup_cnxk() - Setup Octeon device.
  *
@@ -523,5 +569,6 @@ void octep_vf_device_setup_cnxk(struct octep_vf_device *oct)
 	oct->hw_ops.reset_io_queues = octep_vf_reset_io_queues_cnxk;
 
 	oct->hw_ops.dump_registers = octep_vf_dump_registers_cnxk;
+	oct->hw_ops.dump_OQ_registers = octep_vf_dump_OQ_registers_cnxk;
 	octep_vf_init_config_cnxk_vf(oct);
 }

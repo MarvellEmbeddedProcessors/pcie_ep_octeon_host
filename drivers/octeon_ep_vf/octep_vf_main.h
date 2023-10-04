@@ -74,6 +74,7 @@ struct octep_vf_hw_ops {
 	void (*disable_oq)(struct octep_vf_device *oct, int q);
 	void (*reset_io_queues)(struct octep_vf_device *oct);
 	void (*dump_registers)(struct octep_vf_device *oct);
+	void (*dump_OQ_registers)(struct octep_vf_device *oct, int q);
 };
 
 /* Octeon mailbox data */
