@@ -13,6 +13,14 @@ Known Issues
 
 Change Logs
 -----------
+v23.10
+~~~~~
+- octeon_ep_vf: fixed OQ/IQ synchronization issue during repeated open and close operations.
+- octeon_ep: fixed OQ/IQ synchronization issue during repeated open and close operations.
+- octeon_ep_vf: Prevent kernel crash for unexpected errors detected during packet processing.
+- octeon_ep: Prevent kernel crash for unexpected errors detected during packet processing.
+- phc: fix crash during remove sequence.
+
 v23.08
 ~~~~~
 - octboot_net: add target reset functionality
