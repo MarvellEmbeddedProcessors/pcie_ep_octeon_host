@@ -1793,15 +1793,25 @@ static void teardown_mdev_resources(struct octboot_net_dev *mdev)
 static void __exit octboot_net_exit(void)
 {
 	struct octboot_net_dev *mdev;
+	struct pci_dev *pdev = NULL;
 	int i;
 
 	cancel_delayed_work(&octboot_net_init_task);
 	flush_workqueue(octboot_net_init_wq);
 	destroy_workqueue(octboot_net_init_wq);
 
+	pr_info("octboot_net: exitdebug ocnet_num_device %d\n", octnet_num_device);
 	for (i = 0; i < octnet_num_device; i++) {
-		if (!gmdev[i])
+		if (!gmdev[i]) {
+			while ((pdev = pci_get_device(vendor_id, PCI_ANY_ID, pdev))) {
+				if ((pdev->device != device_id_f95n) &&
+				     (pdev->device != device_id_f105n))
+					continue;
+				pr_info("octboot_net exitdebug: remove sysfs\n");
+				device_remove_file(&pdev->dev, &dev_attr_octboot_reset);
+			}
 			continue;
+		}
 	mdev = gmdev[i];
 	netif_carrier_off(mdev->ndev);
 	change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
