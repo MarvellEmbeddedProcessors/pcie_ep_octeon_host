@@ -238,10 +238,18 @@ static int oct_ep_ptp_enable(struct ptp_clock_info *ptp,
 	/* Nothing to do here, PTP hardware is enabled by EP */
 	return 0;
 }
+
+#ifdef NO_ADJ_FREQ_HANDLER
+static int oct_ep_ptp_adjfine(struct ptp_clock_info *ptp, long ppm)
+{
+	return -ENOTSUPP;
+}
+#else
 static int oct_ep_ptp_adjfreq(struct ptp_clock_info *ptp, s32 ppb)
 {
 	return -ENOTSUPP;
 }
+#endif
 
 static int oct_ep_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 {
@@ -262,7 +270,11 @@ static struct ptp_clock_info oct_ep_ptp_caps = {
 	.n_ext_ts	= 0,
 	.n_pins		= 0,
 	.pps		= 0,
+#ifdef	NO_ADJ_FREQ_HANDLER
+	.adjfine 	= oct_ep_ptp_adjfine,
+#else
 	.adjfreq	= oct_ep_ptp_adjfreq,
+#endif
 	.adjtime	= oct_ep_ptp_adjtime,
 	.gettime64	= oct_ep_ptp_gettime_cn9xxx,
 	.settime64	= oct_ep_ptp_settime,
