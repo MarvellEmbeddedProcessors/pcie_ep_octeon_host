@@ -318,6 +318,8 @@ void octep_vf_free_oqs(struct octep_vf_device *oct)
 	}
 }
 
+static void __maybe_unused octep_vf_oq_dump_state(struct octep_vf_oq *oq);
+
 /**
  * octep_vf_oq_check_hw_for_pkts() - Check for new Rx packets.
  *
@@ -330,6 +332,7 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 					 struct octep_vf_oq *oq)
 {
 	u32 pkt_count, new_pkts;
+	u32 last_pkt_count, pkts_pending;
 
 	pkt_count = readl(oq->pkts_sent_reg);
 	if (unlikely(pkt_count == 0xFFFFFFFF)) {
@@ -340,7 +343,15 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 		}
 		return 0;
 	}
-	new_pkts = pkt_count - oq->last_pkt_count;
+	last_pkt_count = READ_ONCE(oq->last_pkt_count);
+	new_pkts = pkt_count - last_pkt_count;
+
+	if (pkt_count < last_pkt_count) {
+		dev_err(oq->dev, "OQ-%u pkt_count(%u) < oq->last_pkt_count(%u)\n",
+			oq->q_no, pkt_count, last_pkt_count);
+		oct->hw_ops.dump_OQ_registers(oct, oq->q_no);
+		octep_vf_oq_dump_state(oq);
+	}
 
 	/* Clear the hardware packets counter register if the rx queue is
 	 * being processed continuously with-in a single interrupt and
@@ -359,8 +370,9 @@ static int octep_vf_oq_check_hw_for_pkts(struct octep_vf_device *oct,
 		dev_err(oq->dev, "OQ-%u pkt_count  > 0xF0000000U\n", oq->q_no);
 		new_pkts += pkt_count;
 	}
-	oq->last_pkt_count = pkt_count;
-	oq->pkts_pending += new_pkts;
+	WRITE_ONCE(oq->last_pkt_count, pkt_count);
+	pkts_pending = READ_ONCE(oq->pkts_pending);
+	WRITE_ONCE(oq->pkts_pending, (pkts_pending + new_pkts));
 	return new_pkts;
 }
 
@@ -408,7 +420,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 	struct page *page;
 	u32 read_idx, i;
 
-	read_idx = oq->host_read_idx;
+	read_idx = READ_ONCE(oq->host_read_idx);
 	rx_bytes = 0;
 	desc_used = 0;
 	for (pkt = 0; pkt < pkts_to_process; pkt++) {
@@ -539,7 +551,7 @@ static int __octep_vf_oq_process_rx(struct octep_vf_device *oct,
 		napi_gro_receive(oq->napi, skb);
 	}
 
-	oq->host_read_idx = read_idx;
+	WRITE_ONCE(oq->host_read_idx, read_idx);
 	oq->refill_count += desc_used;
 	oq->stats.packets += pkt;
 	oq->stats.bytes += rx_bytes;
@@ -562,6 +574,7 @@ int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget)
 {
 	u32 pkts_available, pkts_processed, total_pkts_processed;
 	struct octep_vf_device *oct = oq->octep_vf_dev;
+	u32 pkts_pending;
 
 	pkts_available = 0;
 	pkts_processed = 0;
@@ -571,16 +584,19 @@ int octep_vf_oq_process_rx(struct octep_vf_oq *oq, int budget)
 			return 0;
 
 		 /* update pending count only when current one exhausted */
-		if (oq->pkts_pending == 0)
+		pkts_pending = READ_ONCE(oq->pkts_pending);
+		if (pkts_pending == 0)
 			octep_vf_oq_check_hw_for_pkts(oct, oq);
+		pkts_pending = READ_ONCE(oq->pkts_pending);
 		pkts_available = min(budget - total_pkts_processed,
-				     oq->pkts_pending);
+				     pkts_pending);
 		if (!pkts_available)
 			break;
 
 		pkts_processed = __octep_vf_oq_process_rx(oct, oq,
 							  pkts_available);
-		oq->pkts_pending -= pkts_processed;
+		pkts_pending = READ_ONCE(oq->pkts_pending);
+		WRITE_ONCE(oq->pkts_pending, (pkts_pending - pkts_processed));
 		total_pkts_processed += pkts_processed;
 
 		if (oq->suspend == true)
