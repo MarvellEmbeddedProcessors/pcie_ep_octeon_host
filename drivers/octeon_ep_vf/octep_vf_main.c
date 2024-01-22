@@ -19,7 +19,6 @@
 #include "octep_vf_main.h"
 
 struct workqueue_struct *octep_vf_wq;
-
 /* Supported Devices */
 static const struct pci_device_id octep_vf_pci_id_tbl[] = {
 	{PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, OCTEP_PCI_DEVICE_ID_CN93_VF)},
@@ -472,6 +471,35 @@ static void octep_vf_set_link_status(struct octep_vf_device *oct, bool up)
 		return;
 	}
 	oct->link_info.oper_up = up;
+}
+
+/**
+ * octep_vf_hb_timeout_task - work queue task to check PF state.
+ *
+ * @work: pointer to hb work_struct
+ *
+ * Check for PF state by reading PF VF data Mailbox register.
+ * if the read value is all F's means PF/PCIe is in reset state,
+ * Then trun off netif carrier.
+ *
+ **/
+static void octep_vf_hb_timeout_task(struct work_struct *work)
+{
+	struct octep_vf_device *oct = container_of(work, struct octep_vf_device,
+						hb_task.work);
+	struct octep_vf_mbox *mbox = NULL;
+	u64 pf_vf_data;
+
+	mbox = oct->mbox;
+        pf_vf_data = readq(mbox->mbox_read_reg);
+	if (pf_vf_data == 0xFFFFFFFFFFFFFFFFU) {
+		dev_err(&oct->pdev->dev, "VF interface :%s. carrier off\n",
+			oct->netdev->name);
+		netif_carrier_off(oct->netdev);
+		return;
+	}
+	queue_delayed_work(octep_vf_wq, &oct->hb_task,
+			   msecs_to_jiffies(OCTEP_DEFAULT_VF_HB_INTERVAL));
 }
 
 static bool octep_vf_drv_down_in_progress(struct octep_vf_device *oct)
@@ -1273,6 +1301,9 @@ static int octep_vf_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 
 	clear_bit(OCTEP_VF_DEV_STATE_OPEN, &octep_vf_dev->state);
+	INIT_DELAYED_WORK(&octep_vf_dev->hb_task, octep_vf_hb_timeout_task);
+	queue_delayed_work(octep_vf_wq, &octep_vf_dev->hb_task,
+			   msecs_to_jiffies(OCTEP_DEFAULT_VF_HB_INTERVAL));
 
 	dev_info(&pdev->dev, "Device probe successful\n");
 	return 0;
@@ -1310,6 +1341,7 @@ static void octep_vf_remove(struct pci_dev *pdev)
 	if (!oct)
 		return;
 
+	cancel_delayed_work_sync(&oct->hb_task);
 	octep_vf_mbox_dev_remove(oct);
 	cancel_work_sync(&oct->tx_timeout_task);
 	netdev = oct->netdev;

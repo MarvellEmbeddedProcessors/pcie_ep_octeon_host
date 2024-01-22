@@ -299,6 +299,8 @@ struct octep_vf_device {
 
 	/* firmware info */
 	struct octep_vf_fw_info fw_info;
+	/* Task to check PF/PCIe device state */
+	struct delayed_work hb_task;
 };
 
 static inline u16 OCTEP_VF_MAJOR_REV(struct octep_vf_device *oct)

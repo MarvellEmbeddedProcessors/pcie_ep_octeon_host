@@ -76,6 +76,9 @@
 
 #define CFG_GET_IOQ_MSIX(cfg)            ((cfg)->msix_cfg.ioq_msix)
 
+/* PF/PCIe device state check interval in milliseconds */
+#define OCTEP_DEFAULT_VF_HB_INTERVAL            1000
+
 /* Hardware Tx Queue configuration. */
 struct octep_vf_iq_config {
 	/* Size of the Input queue (number of commands) */
