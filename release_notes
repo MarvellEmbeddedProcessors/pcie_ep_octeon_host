@@ -13,6 +13,11 @@ Known Issues
 
 Change Logs
 -----------
+v24.01
+~~~~~
+- octeon_ep_vf: avoid compiler optimizations and IQ/OQ reordering.
+- octeon_ep: avoid compiler optimizations and IQ/OQ reordering.
+
 v23.11
 ~~~~~
 - octboot_net: fix: properly remove sysfs entry when the device hasn't been "activated".
