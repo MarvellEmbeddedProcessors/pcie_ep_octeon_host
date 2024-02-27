@@ -13,6 +13,12 @@ Known Issues
 
 Change Logs
 -----------
+v24.02
+~~~~~
+- octeon_ep_vf: Set VF carrier OFF when heartbeats timeout.
+- octboot_net: Add module parameter to control default target reset behavior on load.
+- phc:For kernels 6.2 and above use "adjfine" handler.
+
 v24.01
 ~~~~~
 - octeon_ep_vf: avoid compiler optimizations and IQ/OQ reordering.
