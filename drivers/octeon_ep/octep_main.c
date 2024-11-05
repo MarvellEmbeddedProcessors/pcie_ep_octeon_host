@@ -1217,7 +1217,7 @@ static int octep_get_vf_config(struct net_device *dev, int vf, struct ifla_vf_in
 static int octep_set_vf_mac(struct net_device *dev, int vf, u8 *mac)
 {
 	struct octep_device *oct = netdev_priv(dev);
-	int i;
+	int i, err;
 
 	if (!is_valid_ether_addr(mac)) {
 		dev_err(&oct->pdev->dev, "Invalid  MAC Address %pM\n", mac);
@@ -1228,6 +1228,13 @@ static int octep_set_vf_mac(struct net_device *dev, int vf, u8 *mac)
 	for (i = 0; i < ETH_ALEN; i++)
 		oct->vf_info[vf].mac_addr[i] = mac[i];
 	oct->vf_info[vf].flags |=  OCTEON_PFVF_FLAG_MAC_SET_BY_PF;
+
+	err = octep_ctrl_net_set_mac_addr(oct, vf, mac, true);
+	if (err) {
+		dev_err(&oct->pdev->dev, "Set VF%d MAC address failed via host control Mbox\n", vf);
+		return err;
+	}
+
 	return 0;
 }
 
