@@ -133,6 +133,8 @@ struct octep_ctrl_mbox {
 	struct octep_ctrl_mbox_q h2fq;
 	/* fw-to-host queue */
 	struct octep_ctrl_mbox_q f2hq;
+	/* lock for mbox req list */
+	struct mutex list_lock;
 	/* lock for h2fq */
 	struct mutex h2fq_lock;
 	/* lock for f2hq */

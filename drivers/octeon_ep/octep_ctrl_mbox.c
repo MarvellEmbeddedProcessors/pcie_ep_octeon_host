@@ -78,6 +78,8 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox)
 	if (!mbox)
 		return -EINVAL;
 
+	mutex_init(&mbox->list_lock);
+
 	if (!mbox->barmem) {
 		pr_err("octep_ctrl_mbox : Invalid barmem %p\n", mbox->barmem);
 		return -EINVAL;
@@ -290,6 +292,7 @@ octep_ctrl_mbox_uninit(struct octep_ctrl_mbox *mbox)
 	/* ensure uninit state is written before uninitialization */
 	wmb();
 
+	mutex_destroy(&mbox->list_lock);
 	mutex_destroy(&mbox->h2fq_lock);
 	mutex_destroy(&mbox->f2hq_lock);
 

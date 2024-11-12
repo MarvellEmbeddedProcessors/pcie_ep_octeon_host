@@ -63,11 +63,15 @@ static int send_mbox_req(struct octep_device *oct,
 
 	d->done = 0;
 	INIT_LIST_HEAD(&d->list);
+	mutex_lock(&oct->ctrl_mbox.list_lock);
 	list_add_tail(&d->list, &oct->ctrl_req_wait_list);
+	mutex_unlock(&oct->ctrl_mbox.list_lock);
 	ret = wait_event_interruptible_timeout(oct->ctrl_req_wait_q,
 					       (d->done != 0),
-					       msecs_to_jiffies(2000));
+					       msecs_to_jiffies(8000));
+	mutex_lock(&oct->ctrl_mbox.list_lock);
 	list_del(&d->list);
+	mutex_unlock(&oct->ctrl_mbox.list_lock);
 	if (ret == 0 || ret == 1)
 		return -EAGAIN;
 
@@ -315,6 +319,7 @@ static int process_mbox_resp(struct octep_device *oct,
 {
 	struct octep_ctrl_net_wait_data *pos, *n;
 
+	mutex_lock(&oct->ctrl_mbox.list_lock);
 	list_for_each_entry_safe(pos, n, &oct->ctrl_req_wait_list, list) {
 		if (pos->msg.hdr.s.msg_id == msg->hdr.s.msg_id) {
 			memcpy(&pos->data.resp,
@@ -325,6 +330,7 @@ static int process_mbox_resp(struct octep_device *oct,
 			break;
 		}
 	}
+	mutex_unlock(&oct->ctrl_mbox.list_lock);
 
 	return 0;
 }
@@ -452,8 +458,10 @@ int octep_ctrl_net_uninit(struct octep_device *oct)
 
 	octep_ctrl_net_dev_remove(oct, OCTEP_CTRL_NET_INVALID_VFID);
 
+	mutex_lock(&oct->ctrl_mbox.list_lock);
 	list_for_each_entry_safe(pos, n, &oct->ctrl_req_wait_list, list)
 		pos->done = 1;
+	mutex_unlock(&oct->ctrl_mbox.list_lock);
 
 	wake_up_interruptible_all(&oct->ctrl_req_wait_q);
 
