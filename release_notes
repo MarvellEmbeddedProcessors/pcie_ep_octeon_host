@@ -14,6 +14,11 @@ Known Issues
 Change Logs
 -----------
 
+v25.01
+~~~~~~
+- octeon_ep: send VF mac to cp agent in ndo_set_vf.
+- octeon_ep: Fix kernel crash issue observed by rhel on aarch64 platform.
+
 v24.11
 ~~~~~
 - octeon_ep_vf: add null checks oq/iq
