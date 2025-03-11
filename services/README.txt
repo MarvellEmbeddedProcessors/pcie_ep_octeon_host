@@ -73,3 +73,109 @@ Go to services directory.
 4.	Run tftpboot from uboot prompt as follows.
 
 	#	tftpboot $loadaddr 192.168.10.2:<imagefile>
+
+
+
+Firmware patches to be applied:
+------------------------------
+
+1st patch:
+----------
+
+From 1de94eebf246ffd47f5ba91020b3650382e9622b Mon Sep 17 00:00:00 2001
+From: Vimlesh Kumar <vimleshk@marvell.com>
+Date: Sun, 12 May 2024 06:13:12 -0700
+Subject: [PATCH] Drivers: modify dpi_pf driver to send dma request through PF1
+
+Modified dpi_pf driver to meet user space octboot_net requirement
+which is expected to work with PF1 and not on PF0.
+
+Signed-off-by: Vimlesh Kumar <vimleshk@marvell.com>
+Change-Id: I8af13d8cd340929c4bf2eb7f3b43fa7bb25879b7
+---
+
+diff --git a/drivers/net/cn10k/dpi_pf.c b/drivers/net/cn10k/dpi_pf.c
+index a1768e0..6b13446 100644
+--- a/drivers/net/cn10k/dpi_pf.c
++++ b/drivers/net/cn10k/dpi_pf.c
+@@ -258,6 +258,8 @@
+ 	header->cn10k.nlst = 1;
+ 	header->cn10k.ptr = (u64)new_instr->compaddr;
+ 	header->cn10k.lport = 0;
++	header->cn10k.pvfe = 1;
++	header->cn10k.func = 0x1000;
+ 	header->cn10k.xtype = new_instr->xfer_dir;
+ 
+ 	if (new_instr->xfer_dir == DPI_HDR_XTYPE_E_INBOUND) {
+diff --git a/drivers/net/octeontx2/dpi_pf.c b/drivers/net/octeontx2/dpi_pf.c
+index 72697ab..c15719b 100644
+--- a/drivers/net/octeontx2/dpi_pf.c
++++ b/drivers/net/octeontx2/dpi_pf.c
+@@ -258,6 +258,8 @@
+ 	header->cn98xx.nlst = 1;
+ 	header->cn98xx.ptr = (u64)new_instr->compaddr;
+ 	header->cn98xx.lport = 0;
++	header->cn98xx.pvfe = 1;
++	header->cn98xx.func = 0x1000;
+ 	header->cn98xx.xtype = new_instr->xfer_dir;
+ 
+ 	lptr.s.ptr = new_instr->localaddr;
+
+2nd patch:
+---------
+
+From aab808cf25643ea3da8655a16d9aa13495a9981d Mon Sep 17 00:00:00 2001
+From: Vimlesh Kumar <vimleshk@marvell.com>
+Date: Wed, 24 Apr 2024 21:58:45 -0700
+Subject: [PATCH] Thor/Loki : Disable FLR on PF1 with device id ef00
+
+Disable FLR on PF1, other PFs have default FLR as ON.
+
+Signed-off-by: Vimlesh Kumar <vimleshk@marvell.com>
+Change-Id: If4c0e3241cd1060780a5bd0625478a269e5a43fb
+---
+
+diff --git a/cn10k/libebf-boot/ebf-boot-pcie.c b/cn10k/libebf-boot/ebf-boot-pcie.c
+index 19380bc..ecc6940 100644
+--- a/cn10k/libebf-boot/ebf-boot-pcie.c
++++ b/cn10k/libebf-boot/ebf-boot-pcie.c
+@@ -967,8 +967,18 @@
+                 /* Enable PF FLR to reset the chip, enable is per PF */
+                 for (int pf = 0; pf < EBF_CN10K_MAX_PFS;pf++)
+                 {
+-                    EBF_CSR_MODIFY(c, EBF_PEMX_PFX_CTL_STATUS(p, pf),
+-                                   c.s.pf_flr_en = 1;);
++		    if (pf == 1)
++		    {
++                        printf("Disable FLRs on PF%d\n", pf);
++                        EBF_CSR_MODIFY(c, EBF_PEMX_PFX_CTL_STATUS(p, pf),
++                                       c.s.pf_flr_en = 0;);
++		    }
++		    else
++		    {
++                        printf("Enable FLRs on PF%d\n", pf);
++                        EBF_CSR_MODIFY(c, EBF_PEMX_PFX_CTL_STATUS(p, pf),
++                                       c.s.pf_flr_en = 1;);
++		    }
+                 }
+             }
+ 
+diff --git a/libebf-boot/ebf-boot-pcie.c b/libebf-boot/ebf-boot-pcie.c
+index e1c3f30..5afd76b 100644
+--- a/libebf-boot/ebf-boot-pcie.c
++++ b/libebf-boot/ebf-boot-pcie.c
+@@ -196,6 +196,14 @@
+                              */
+                             EBF_CSR_MODIFY(c, n, EBF_PCIEEPX_VSECST_CTL(p),
+                                            c.s.status = 0);
++
++			    if (ebf_is_model(OCTEONTX_LOKI))
++                            {
++                                printf("\nDisable FLRs on PF1\n");
++                                EBF_CSR_MODIFY(c, n, EBF_PEMX_PFX_CTL_STATUS(p, 1),
++                                                               c.s.pf_flr_en = 0);
++                            }
++
+                         }
+                     }
+                     else
