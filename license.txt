@@ -1,0 +1,17 @@
+Pcie_ep_octeon_host services  License Summary
+=============================================
+
+Pcie_ep_octeon_host-services project contains linux application
+developed by Marvell to provide firmware image transfer facility using tftp.
+This file gives short overview of the exact license information for this component.
+In the event of a conflict, the license header of a specific file takes precedence
+over this file. This is just a summary file.
+
+Pcie_ep_octeon_host-services component
+======================================
+
+Component:      services
+License:        BSD-3-Clause (SPDX-License-Identifier: BSD-3-Clause)
+License Text:   https://spdx.org/licenses/BSD-3-Clause.html#licenseText
+Project URL:    N/A
+Directories:    services
