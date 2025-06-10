@@ -15,6 +15,8 @@
 #include <linux/circ_buf.h>
 #include <linux/version.h>
 #include <linux/reboot.h>
+#include <linux/vmalloc.h>
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #include <linux/sched/signal.h>
 #endif
@@ -281,7 +283,7 @@ OCTEP_PCI_WIN_WRITE(u8 *wr_addr, u8 *wr_data, u64 addr, u64 val)
         pr_info("%s: reg: 0x%016llx val: 0x%016llx\n", __func__, addr, val);
 }
 
-void reset_fw_ready_state(struct pci_dev *pdev)
+static void reset_fw_ready_state(struct pci_dev *pdev)
 {
 	void *hw_addr;
 	int ret;
@@ -320,7 +322,7 @@ void reset_fw_ready_state(struct pci_dev *pdev)
 	dev_info(&pdev->dev, "Octeon reset_fw_ready_state iounmap ...\n");
 }
 
-bool is_flr_inprogress(int index)
+static bool is_flr_inprogress(int index)
 {
 	int status;
 	if ((octboot_struct[index].octboot_net_init_done) && (octboot_struct[index].mdev)) {
@@ -472,7 +474,7 @@ static ssize_t sec_bus_reset_store(struct device *dev, struct device_attribute *
 
 static DEVICE_ATTR(sec_bus_reset, 0200, NULL, sec_bus_reset_store);
 
-int reset_target(void)
+static int reset_target(void)
 {
 	struct pci_dev *pdev = NULL;
 	int ret;
@@ -493,7 +495,7 @@ int reset_target(void)
 	return 0;
 }
 
-int create_sysfs_entry(void)
+static int create_sysfs_entry(void)
 {
 	struct pci_dev *pdev = NULL;
 	int ret;
@@ -1031,7 +1033,7 @@ static void octboot_net_get_stats64(struct net_device *dev,
 	}
 }
 
-netdev_tx_t octboot_net_tx(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t octboot_net_tx(struct sk_buff *skb, struct net_device *dev)
 {
 	struct octboot_net_dev *mdev =
 		(struct octboot_net_dev *)netdev_priv(dev);
@@ -1796,7 +1798,7 @@ static const struct ethtool_ops octboot_net_ethtool_ops = {
 	.get_link = ethtool_op_get_link,
 };
 
-void octboot_net_set_ethtool_ops(struct net_device *netdev)
+static void octboot_net_set_ethtool_ops(struct net_device *netdev)
 {
 	netdev->ethtool_ops = &octboot_net_ethtool_ops;
 }
