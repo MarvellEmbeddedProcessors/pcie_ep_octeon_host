@@ -34,11 +34,6 @@ MODULE_PARM_DESC(startup_set_ptp, "Flag to set PTP clock to host clock at startu
 
 void __iomem *nwa_bar0_internal_addr;
 
-uint64_t octeon_pci_bar4_read64(octeon_device_t *oct_dev, int baridx, uint64_t bar_offset);
-void octeon_pci_bar4_write64(octeon_device_t *oct_dev, int baridx, uint64_t bar_offset, uint64_t val);
-
-int octeon_chip_specific_setup(octeon_device_t *oct_dev);
-
 #ifndef  DEFINE_PCI_DEVICE_TABLE
 #define  DEFINE_PCI_DEVICE_TABLE(octeon_ep_phc_pci_tbl) struct pci_device_id octeon_ep_phc_pci_tbl[]
 #endif
@@ -367,7 +362,7 @@ static ssize_t octeon_ep_phc_sysfs_device_show(struct kobject *kobj,
 }
 
 /* Device initialization for each Octeon device. */
-int octeon_device_init(octeon_device_t *oct_dev)
+static int octeon_device_init(octeon_device_t *oct_dev)
 {
 	int ret;
 

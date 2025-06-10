@@ -376,4 +376,10 @@ int octeon_map_pci_barx(octeon_device_t *oct, int baridx, int max_map_len);
 
 void octeon_destroy_resources(octeon_device_t *oct_dev);
 
+int octeon_chip_specific_setup(octeon_device_t *oct_dev);
+
+uint64_t octeon_pci_bar4_read64(octeon_device_t *oct_dev, int baridx, uint64_t bar_offset);
+
+void octeon_pci_bar4_write64(octeon_device_t *oct_dev, int baridx, uint64_t bar_offset, uint64_t val);
+
 #endif
