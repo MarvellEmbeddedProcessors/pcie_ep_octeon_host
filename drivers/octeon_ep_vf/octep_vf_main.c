@@ -1185,7 +1185,7 @@ static void octep_vf_device_cleanup(struct octep_vf_device *oct)
 	oct->conf = NULL;
 }
 
-int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
+static int octep_vf_get_mac_addr(struct octep_vf_device *oct, u8 *addr)
 {
 	return octep_vf_mbox_get_mac_addr(oct, addr);
 }
