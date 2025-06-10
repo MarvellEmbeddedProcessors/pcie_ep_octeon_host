@@ -1981,7 +1981,7 @@ static int octep_reset_done(struct pci_dev *pdev)
 	return 0;
 }
 
-void octep_cleanup_aer_uncorrect_error_status(struct pci_dev *pdev)
+static void octep_cleanup_aer_uncorrect_error_status(struct pci_dev *pdev)
 {
 	int pos = 0x100;
 	u32 status, mask;
@@ -2005,7 +2005,7 @@ void octep_cleanup_aer_uncorrect_error_status(struct pci_dev *pdev)
  * This function is called after a PCI bus error affecting
  * this device has been detected.
  */
-pci_ers_result_t
+static pci_ers_result_t
 octep_pcie_error_detected(struct pci_dev *pdev, pci_channel_state_t state)
 {
 	struct octep_device *oct = pci_get_drvdata(pdev);
@@ -2023,7 +2023,7 @@ octep_pcie_error_detected(struct pci_dev *pdev, pci_channel_state_t state)
 	return PCI_ERS_RESULT_DISCONNECT;
 }
 
-pci_ers_result_t octep_pcie_mmio_enabled(struct pci_dev *pdev)
+static pci_ers_result_t octep_pcie_mmio_enabled(struct pci_dev *pdev)
 {
 	/* We should never hit this since we never ask for a reset for a Fatal
 	 * Error. We always return DISCONNECT in io_error above. */
@@ -2039,7 +2039,7 @@ pci_ers_result_t octep_pcie_mmio_enabled(struct pci_dev *pdev)
  * Restart the card from scratch, as if from a cold-boot. Implementation
  * resembles the first-half of the octeon_resume routine.
  */
-pci_ers_result_t octep_pcie_slot_reset(struct pci_dev * pdev)
+static pci_ers_result_t octep_pcie_slot_reset(struct pci_dev * pdev)
 {
 	/* We should never hit this since we never ask for a reset for a Fatal
 	 * Error. We always return DISCONNECT in io_error above. */
@@ -2056,7 +2056,7 @@ pci_ers_result_t octep_pcie_slot_reset(struct pci_dev * pdev)
  * its OK to resume normal operation. Implementation resembles the
  * second-half of the octeon_resume routine.
  */
-void octep_pcie_resume(struct pci_dev *pdev)
+static void octep_pcie_resume(struct pci_dev *pdev)
 {
 	dev_err(&pdev->dev, "octep_pcie_resume\n");
 	/* Nothing to be done here. */

@@ -13,6 +13,7 @@
 #include "octep_config.h"
 #include "octep_main.h"
 #include "octep_ctrl_net.h"
+#include "octep_compat.h"
 
 static const char octep_gstrings_global_stats[][ETH_GSTRING_LEN] = {
 	"rx_packets",
@@ -452,7 +453,11 @@ static int octep_set_link_ksettings(struct net_device *netdev,
 	return 0;
 }
 
+#if defined(USE_KERNEL_ETHTOOL_TS_INFO)
+static int octep_get_ts_info(struct net_device *ndev, struct kernel_ethtool_ts_info *info)
+#else
 static int octep_get_ts_info(struct net_device *ndev, struct ethtool_ts_info *info)
+#endif
 {
 	info->so_timestamping =
 		SOF_TIMESTAMPING_TX_SOFTWARE |

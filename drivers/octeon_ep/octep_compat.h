@@ -68,6 +68,11 @@ int pci_enable_ptm(struct pci_dev *dev, u8 *granularity);
 #if KERNEL_VERSION(6, 0, 0) > LINUX_VERSION_CODE
 #define USE_PCIE_ERROR_REPORTING_API
 #endif
+
+#if KERNEL_VERSION(6, 10, 0) < LINUX_VERSION_CODE
+#define USE_KERNEL_ETHTOOL_TS_INFO
+#endif
+
 #endif
 
 #endif /* _OCTEP_COMPAT_H_ */
