@@ -11,6 +11,9 @@
 #include <linux/version.h>
 
 #if defined(RHEL_RELEASE_CODE)
+#if (RHEL_RELEASE_VERSION(9, 6) <= RHEL_RELEASE_CODE)
+#define USE_KERNEL_ETHTOOL_TS_INFO
+#endif
 #if (RHEL_RELEASE_VERSION(9, 4) > RHEL_RELEASE_CODE)
 #define USE_PCIE_ERROR_REPORTING_API
 #endif
