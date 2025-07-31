@@ -21,7 +21,10 @@
 #else
 #define NAPI_ADD_HAS_BUDGET_ARG 1
 #endif
+#if (RHEL_RELEASE_VERSION(9, 2) > RHEL_RELEASE_CODE)
 #define USE_ETHER_ADDR_COPY
+#else
+#endif
 #define NO_SKB_XMIT_MORE
 #else
 #error "RHEL versions before rhel-8.4 not supported !!!"
