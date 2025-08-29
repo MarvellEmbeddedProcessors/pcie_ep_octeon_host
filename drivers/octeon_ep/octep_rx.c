@@ -1,262 +1,488 @@
-// SPDX-License-Identifier: GPL-2.0
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <linux/pci.h>
-#include <linux/etherdevice.h>
-#include <linux/vmalloc.h>
-
-#include "octep_config.h"
+#include "octep_bsd.h"
 #include "octep_main.h"
+#include "octep_config.h"
+#include "octep_ctrl_net.h"
 
-static void octep_oq_reset_indices(struct octep_oq *oq)
+static void
+octep_oq_reset_indices(struct octep_oq *oq)
 {
+	mtx_lock(&oq->lock);
 	oq->host_read_idx = 0;
 	oq->host_refill_idx = 0;
 	oq->refill_count = 0;
+	atomic_store_int(&oq->pkts_pending, 0);
 	oq->last_pkt_count = 0;
-	oq->pkts_pending = 0;
+	mtx_unlock(&oq->lock);
 }
 
-/**
- * octep_oq_fill_ring_buffers() - fill initial receive buffers for Rx ring.
- *
- * @oq: Octeon Rx queue data structure.
- *
- * Return: 0, if successfully filled receive buffers for all descriptors.
- *         -1, if failed to allocate a buffer or failed to map for DMA.
- */
-static int octep_oq_fill_ring_buffers(struct octep_oq *oq)
+static void
+octep_dma_map_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
+{
+	bus_addr_t *addr = (bus_addr_t *)arg;
+	if (error || nseg != 1)
+		return;
+	*addr = segs[0].ds_addr;
+}
+
+static int
+octep_map_ring(struct octep_oq *oq, struct mbuf *mb, bus_dmamap_t map, uint64_t *dma_addr)
+{
+	int error;
+
+	if (map == NULL) {
+		oq->stats.rx_dma_mapping_err++;
+		dev_err(oq->pdev, "Null DMA map in octep_map_ring for OQ-%d\n", oq->q_no);
+		return EINVAL;
+	}
+	if (mb == NULL || mb->m_data == NULL) {
+		oq->stats.alloc_failures++;
+		dev_err(oq->pdev, "Invalid mbuf in octep_map_ring for OQ-%d\n", oq->q_no);
+		return EINVAL;
+	}
+
+	error = bus_dmamap_load(oq->rx_buf_tag, map, mb->m_data, mb->m_len,
+							octep_dma_map_addr, dma_addr, 0);
+	if (error) {
+		oq->stats.rx_dma_mapping_err++;
+		dev_err(oq->pdev, "DMA mapping failed for OQ-%d: %d\n", oq->q_no, error);
+		return error;
+	}
+	bus_dmamap_sync(oq->rx_buf_tag, map, BUS_DMASYNC_PREREAD);
+	return 0;
+}
+
+int
+octep_oq_check_hw_for_pkts(struct octep_device *oct, struct octep_oq *oq)
+{
+	uint32_t pkt_count, new_pkts;
+	uint32_t last_pkt_count, pkts_pending;
+
+	pkt_count = octep_read_csr(oct, oq->pkts_sent_reg);
+	if (pkt_count == 0xFFFFFFFF) {
+		octep_write_csr(oct, oq->pkts_sent_reg, pkt_count);
+		pkt_count = 0;
+		return 0;
+	}
+
+	last_pkt_count = atomic_load_acq_int(&oq->last_pkt_count);
+	new_pkts = pkt_count - last_pkt_count;
+
+	if (pkt_count < last_pkt_count) {
+		new_pkts = pkt_count + (0xFFFFFFFFU - last_pkt_count) + 1;
+	}
+
+	if (pkt_count > 0xF0000000U) {
+		octep_write_csr(oct, oq->pkts_sent_reg, pkt_count);
+		pkt_count = octep_read_csr(oct, oq->pkts_sent_reg);
+		if (pkt_count == 0xFFFFFFFF) {
+			pkt_count = 0;
+		}
+		new_pkts += pkt_count;
+	}
+
+	atomic_store_rel_int(&oq->last_pkt_count, pkt_count);
+	pkts_pending = atomic_load_acq_int(&oq->pkts_pending);
+	atomic_store_rel_int(&oq->pkts_pending, pkts_pending + new_pkts);
+
+	return new_pkts;
+}
+
+static inline uint32_t
+octep_incr_index(uint32_t index, uint32_t count, uint32_t max)
+{
+	if ((index + count) >= max)
+		index = index + count - max;
+	else
+		index += count;
+
+	return (index);
+}
+
+
+static int
+octep_oq_refill_alloc_descs(struct octep_oq *oq)
 {
 	struct octep_oq_desc_hw *desc_ring = oq->desc_ring;
-	struct octep_oq_resp_hw *resp_hw;
-	struct page *page;
-	u32 i;
+	struct octep_rx_buffer *buf;
+	struct mbuf *mb;
+	uint64_t dma_addr;
+	uint32_t refill_idx = oq->host_refill_idx;
+	uint32_t desc_refilled = 0;
+	int error = 0;
+
+	while (oq->refill_count && (desc_refilled < oq->max_count)) {
+		buf = &oq->buff_info[refill_idx];
+
+		if (buf->buffer == NULL) {
+			mb = m_getjcl(M_NOWAIT, MT_DATA, M_PKTHDR, oq->buffer_size);
+			if (mb == NULL) {
+				oq->stats.alloc_failures++;
+				dev_err(oq->pdev, "%s == mb == NULL\n", __func__);
+				break;
+			}
+
+			mb->m_pkthdr.len = mb->m_len = oq->buffer_size;
+			buf->buffer = mb;
+			buf->data = mb->m_data;
+
+			error = octep_map_ring(oq, mb, buf->dma_map, &dma_addr);
+			if (error) {
+				m_free(mb);
+				buf->buffer = NULL;
+				buf->data = NULL;
+				dev_err(oq->pdev, "%s == DMA map error\n", __func__);
+				break;
+			}
+
+			desc_ring[refill_idx].buffer_ptr = dma_addr;
+			desc_ring[refill_idx].info_ptr = 0;
+			bus_dmamap_sync(oq->rx_buf_tag, buf->dma_map, BUS_DMASYNC_PREREAD);
+
+			desc_refilled++;
+			oq->refill_count--;
+		}
+
+		refill_idx = octep_incr_index(refill_idx, 1, oq->max_count);
+	}
+
+	oq->host_refill_idx = refill_idx;
+	return desc_refilled;
+}
+
+static int
+octep_oq_refill(struct octep_oq *oq)
+{
+	int total_refilled = 0;
+
+	total_refilled += octep_oq_refill_alloc_descs(oq);
+
+	return total_refilled;
+}
+
+static void
+octep_oq_free_ring_buffers(struct octep_oq *oq)
+{
+	struct octep_oq_desc_hw *desc_ring = oq->desc_ring;
+	int i;
+
+	mtx_lock(&oq->lock);
+	if (!oq->desc_ring || !oq->buff_info) {
+		mtx_unlock(&oq->lock);
+		return;
+	}
 
 	for (i = 0; i < oq->max_count; i++) {
-		page = dev_alloc_page();
-		if (unlikely(!page)) {
-			dev_err(oq->dev, "Rx buffer alloc failed\n");
-			goto rx_buf_alloc_err;
+		if (oq->buff_info[i].buffer) {
+			bus_dmamap_unload(oq->rx_buf_tag, oq->buff_info[i].dma_map);
+			m_freem(oq->buff_info[i].buffer);
+			oq->buff_info[i].buffer = NULL;
+			oq->buff_info[i].data = NULL;
+			oq->buff_info[i].len = 0;
+			desc_ring[i].buffer_ptr = 0;
 		}
-		resp_hw = page_address(page);
-		resp_hw->length = 0x0;
-
-		desc_ring[i].buffer_ptr = dma_map_page(oq->dev, page, 0,
-						       PAGE_SIZE,
-						       DMA_FROM_DEVICE);
-		if (dma_mapping_error(oq->dev, desc_ring[i].buffer_ptr)) {
-			dev_err(oq->dev,
-				"OQ-%d buffer alloc: DMA mapping error!\n",
-				oq->q_no);
-			put_page(page);
-			goto dma_map_err;
-		}
-		oq->buff_info[i].page = page;
 	}
 
-	return 0;
-
-dma_map_err:
-rx_buf_alloc_err:
-	while (i) {
-		i--;
-		dma_unmap_page(oq->dev, desc_ring[i].buffer_ptr, PAGE_SIZE, DMA_FROM_DEVICE);
-		put_page(oq->buff_info[i].page);
-		oq->buff_info[i].page = NULL;
-	}
-
-	return -1;
+	octep_oq_reset_indices(oq);
+	mtx_unlock(&oq->lock);
 }
 
-/**
- * octep_oq_refill() - refill buffers for used Rx ring descriptors.
- *
- * @oct: Octeon device private data structure.
- * @oq: Octeon Rx queue data structure.
- *
- * Return: number of descriptors successfully refilled with receive buffers.
- */
-static int octep_oq_refill(struct octep_device *oct, struct octep_oq *oq)
+static int
+octep_free_oq(struct octep_oq *oq)
 {
-	struct octep_oq_desc_hw *desc_ring = oq->desc_ring;
-	struct octep_oq_resp_hw *resp_hw;
-	struct page *page;
-	u32 refill_idx, i;
+	struct octep_device *oct = oq->oct_dev;
+	int q_no = oq->q_no;
+	int i;
 
-	refill_idx = oq->host_refill_idx;
-	for (i = 0; i < oq->refill_count; i++) {
-		page = dev_alloc_page();
-		if (unlikely(!page)) {
-			dev_err(oq->dev, "refill: rx buffer alloc failed\n");
-			oq->stats.alloc_failures++;
-			break;
-		}
-		resp_hw = page_address(page);
-		resp_hw->length = 0x0;
+	mtx_lock(&oq->lock);
+	octep_oq_free_ring_buffers(oq);
+	mtx_unlock(&oq->lock);
 
-		desc_ring[refill_idx].buffer_ptr = dma_map_page(oq->dev, page, 0,
-								PAGE_SIZE, DMA_FROM_DEVICE);
-		if (dma_mapping_error(oq->dev, desc_ring[refill_idx].buffer_ptr)) {
-			dev_err(oq->dev,
-				"OQ-%d buffer refill: DMA mapping error!\n",
-				oq->q_no);
-			put_page(page);
-			oq->stats.alloc_failures++;
-			break;
-		}
-		oq->buff_info[refill_idx].page = page;
-		refill_idx++;
-		if (refill_idx == oq->max_count)
-			refill_idx = 0;
+	if (oq->buff_info) {
+		for (i = 0; i < oq->max_count; i++)
+			bus_dmamap_destroy(oq->rx_buf_tag, oq->buff_info[i].dma_map);
+		free(oq->buff_info, M_DEVBUF);
 	}
-	oq->host_refill_idx = refill_idx;
-	oq->refill_count -= i;
 
-	return i;
+	if (oq->desc_ring) {
+		bus_dmamap_unload(oq->dma_tag, oq->dma_map);
+		bus_dmamem_free(oq->dma_tag, oq->desc_ring, oq->dma_map);
+		bus_dma_tag_destroy(oq->dma_tag);
+		oq->desc_ring = NULL;
+	}
+
+	if (oq->rx_buf_tag) {
+		bus_dma_tag_destroy(oq->rx_buf_tag);
+		oq->rx_buf_tag = NULL;
+	}
+
+	if (oq->lro_enabled) {
+		tcp_lro_free(&oq->lro);
+		oq->lro_enabled = false;
+	}
+
+	mtx_destroy(&oq->lock);
+	free(oq, M_DEVBUF);
+	oct->oq[q_no] = NULL;
+	oct->num_oqs--;
+	return 0;
 }
 
-/**
- * octep_setup_oq() - Setup a Rx queue.
- *
- * @oct: Octeon device private data structure.
- * @q_no: Rx queue number to be setup.
- *
- * Allocate resources for a Rx queue.
- */
-static int octep_setup_oq(struct octep_device *oct, int q_no)
+void octep_oq_dbell_init(struct octep_device *oct)
+{
+	int i;
+
+	for (i = 0; i < oct->num_oqs; i++)
+		octep_write_csr(oct, oct->oq[i]->pkts_credit_reg,
+						oct->oq[i]->max_count);
+}
+
+void
+octep_free_oqs(struct octep_device *oct)
+{
+	int i;
+
+	for (i = 0; i < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); i++) {
+		if (!oct->oq[i])
+			continue;
+		octep_free_oq(oct->oq[i]);
+	}
+	oct->num_oqs = 0;
+}
+
+static int
+octep_oq_fill_ring_buffers(struct octep_oq *oq)
+{
+	struct mbuf *mb;
+	uint64_t dma_addr;
+	uint32_t i;
+	int error = 0;
+	struct octep_rx_buffer *buf;
+
+	for (i = 0; i < oq->max_count; i++) {
+		buf = &oq->buff_info[i];
+
+		if (buf->buffer != NULL || buf->dma_map == NULL) {
+			if (buf->buffer != NULL) {
+				device_printf(oq->pdev, "octep: Buffer already exists at index %d\n", i);
+			}
+			if (buf->dma_map == NULL) {
+				dev_err(oq->pdev,"octep: Missing DMA map for buffer %d\n", i);
+			}
+			continue;
+		}
+
+		mb = m_getjcl(M_NOWAIT, MT_DATA, M_PKTHDR, oq->buffer_size);
+		if (mb == NULL) {
+			oq->stats.alloc_failures++;
+			error = ENOMEM;
+			break;
+		}
+
+		mb->m_pkthdr.len = mb->m_len = oq->buffer_size;
+		buf->buffer = mb;
+		buf->data = mb->m_data;
+
+		error = octep_map_ring(oq, mb, buf->dma_map, &dma_addr);
+		if (error) {
+			m_free(mb);
+			buf->buffer = NULL;
+			buf->data = NULL;
+			break;
+		}
+
+		oq->desc_ring[i].buffer_ptr = dma_addr;
+		oq->desc_ring[i].info_ptr = 0;
+	}
+
+	if (error && i > 0) {
+		while (i--) {
+			buf = &oq->buff_info[i];
+			if (buf->buffer) {
+				bus_dmamap_unload(oq->dma_tag, buf->dma_map);
+				m_free(buf->buffer);
+				buf->buffer = NULL;
+				buf->data = NULL;
+				oq->desc_ring[i].buffer_ptr = 0;
+			}
+		}
+	}
+
+	return error;
+}
+
+static int
+octep_setup_oq(struct octep_device *oct, int q_no)
 {
 	struct octep_oq *oq;
-	u32 desc_ring_size;
+	bus_size_t desc_ring_size;
+	bus_dma_tag_t dma_tag;
+	bus_dmamap_t dma_map;
+	void *desc_ring;
+	int error, i;
 
-	oq = vzalloc(sizeof(*oq));
-	if (!oq)
+	oq = malloc(sizeof(*oq), M_DEVBUF, M_ZERO | M_NOWAIT);
+	if (!oq) {
+		dev_err(oct->pdev, "Failed to allocate OQ-%d structure\n", q_no);
 		goto create_oq_fail;
+	}
 	oct->oq[q_no] = oq;
 
-	oq->octep_dev = oct;
-	oq->netdev = oct->netdev;
-	oq->dev = &oct->pdev->dev;
+	oq->oct_dev = oct;
+	oq->pdev = oct->pdev;
+	oq->ifp = oct->netdev;
 	oq->q_no = q_no;
 	oq->max_count = CFG_GET_OQ_NUM_DESC(oct->conf);
 	oq->ring_size_mask = oq->max_count - 1;
 	oq->buffer_size = CFG_GET_OQ_BUF_SIZE(oct->conf);
 	oq->max_single_buffer_size = oq->buffer_size - OCTEP_OQ_RESP_HW_SIZE;
 
-	/* When the hardware/firmware supports additional capabilities,
-	 * additional header is filled-in by Octeon after length field in
-	 * Rx packets. this header contains additional packet information.
-	 */
 	if (oct->conf->fw_info.rx_ol_flags)
 		oq->max_single_buffer_size -= OCTEP_OQ_RESP_HW_EXT_SIZE;
 
-	oq->refill_threshold = CFG_GET_OQ_REFILL_THRESHOLD(oct->conf);
+	oq->refill_threshold = CFG_GET_OQ_REFILL_THRESHOLD(oct->conf) / 4; /* More aggressive refill */
+
+	mtx_init(&oq->lock, "octep_oq_lock", NULL, MTX_DEF);
+
+	if (oct->netdev->if_capenable & IFCAP_LRO) {
+		error = tcp_lro_init(&oq->lro);
+		if (error) {
+			dev_err(oq->pdev, "Failed to initialize LRO for OQ-%d\n", q_no);
+		}
+		oq->lro.ifp = oct->netdev;
+		oq->lro_enabled = true;
+	}
 
 	desc_ring_size = oq->max_count * OCTEP_OQ_DESC_SIZE;
-	oq->desc_ring = dma_alloc_coherent(oq->dev, desc_ring_size,
-					   &oq->desc_ring_dma, GFP_KERNEL);
-
-	if (unlikely(!oq->desc_ring)) {
-		dev_err(oq->dev,
-			"Failed to allocate DMA memory for OQ-%d !!\n", q_no);
+	error = bus_dma_tag_create(bus_get_dma_tag(oct->pdev), 8, 0, BUS_SPACE_MAXADDR, BUS_SPACE_MAXADDR,
+							   NULL, NULL, desc_ring_size, 1, desc_ring_size,
+							   BUS_DMA_COHERENT, NULL, NULL, &dma_tag);
+	if (error) {
+		dev_err(oq->pdev, "Failed to create DMA tag for OQ-%d\n", q_no);
 		goto desc_dma_alloc_err;
 	}
 
-	oq->buff_info = vzalloc(oq->max_count * OCTEP_OQ_RECVBUF_SIZE);
-	if (unlikely(!oq->buff_info)) {
-		dev_err(&oct->pdev->dev,
-			"Failed to allocate buffer info for OQ-%d\n", q_no);
+	error = bus_dmamem_alloc(dma_tag, &desc_ring, BUS_DMA_NOWAIT | BUS_DMA_ZERO, &dma_map);
+	if (error || !desc_ring) {
+		dev_err(oq->pdev, "Failed to allocate DMA memory for OQ-%d\n", q_no);
+		bus_dma_tag_destroy(dma_tag);
+		goto desc_dma_alloc_err;
+	}
+
+	error = bus_dmamap_load(dma_tag, dma_map, desc_ring, desc_ring_size,
+							octep_dma_map_addr, &oq->desc_ring_dma, 0);
+	if (error) {
+		dev_err(oq->pdev, "Failed to map DMA memory for OQ-%d\n", q_no);
+		bus_dmamem_free(dma_tag, desc_ring, dma_map);
+		bus_dma_tag_destroy(dma_tag);
+		goto desc_dma_alloc_err;
+	}
+
+	oq->desc_ring = desc_ring;
+	oq->dma_tag = dma_tag;
+	oq->dma_map = dma_map;
+
+	error = bus_dma_tag_create(bus_get_dma_tag(oct->pdev), 64, 0, BUS_SPACE_MAXADDR, BUS_SPACE_MAXADDR,
+							   NULL, NULL, oq->buffer_size, 1, oq->buffer_size,
+							   BUS_DMA_COHERENT, NULL, NULL, &oq->rx_buf_tag);
+	if (error) {
+		dev_err(oq->pdev, "Failed to create RX buffer DMA tag for OQ-%d\n", q_no);
+		goto rx_buf_tag_err;
+	}
+
+	oq->buff_info = malloc(oq->max_count * OCTEP_OQ_RECVBUF_SIZE, M_DEVBUF, M_ZERO | M_NOWAIT);
+	if (!oq->buff_info) {
+		dev_err(oct->pdev, "Failed to allocate buffer info for OQ-%d\n", q_no);
 		goto buf_list_err;
 	}
 
-	if (octep_oq_fill_ring_buffers(oq))
+	for (i = 0; i < oq->max_count; i++) {
+		error = bus_dmamap_create(oq->rx_buf_tag, 0, &oq->buff_info[i].dma_map);
+		if (error) {
+			dev_err(oct->pdev, "Failed to create DMA map for OQ-%d buffer %d\n", q_no, i);
+			while (i) {
+				i--;
+				bus_dmamap_destroy(oq->rx_buf_tag, oq->buff_info[i].dma_map);
+			}
+			goto dma_map_err;
+		}
+	}
+
+	if (octep_oq_fill_ring_buffers(oq)) {
+		dev_err(oq->pdev, "Failed to fill ring buffers for OQ-%d\n", q_no);
 		goto oq_fill_buff_err;
+	}
 
 	octep_oq_reset_indices(oq);
-	if (oct->hw_ops.setup_oq_regs(oct, q_no))
+
+	if (oct->hw_ops.setup_oq_regs(oct, q_no)) {
+		dev_err(oq->pdev, "Failed to setup OQ-%d registers\n", q_no);
 		goto oq_fill_buff_err;
+	}
 
 	oct->num_oqs++;
-
 	return 0;
 
 oq_fill_buff_err:
-	vfree(oq->buff_info);
+	for (i = 0; i < oq->max_count; i++) {
+		if (oq->buff_info[i].buffer) {
+			bus_dmamap_unload(oq->rx_buf_tag, oq->buff_info[i].dma_map);
+			m_freem(oq->buff_info[i].buffer);
+		}
+		bus_dmamap_destroy(oq->rx_buf_tag, oq->buff_info[i].dma_map);
+	}
+dma_map_err:
+	free(oq->buff_info, M_DEVBUF);
 	oq->buff_info = NULL;
 buf_list_err:
-	dma_free_coherent(oq->dev, desc_ring_size,
-			  oq->desc_ring, oq->desc_ring_dma);
-	oq->desc_ring = NULL;
+	bus_dma_tag_destroy(oq->rx_buf_tag);
+rx_buf_tag_err:
+	bus_dmamap_unload(dma_tag, dma_map);
+	bus_dmamem_free(dma_tag, oq->desc_ring, dma_map);
+	bus_dma_tag_destroy(dma_tag);
 desc_dma_alloc_err:
-	vfree(oq);
+	oq->desc_ring = NULL;
+	mtx_destroy(&oq->lock);
+	free(oq, M_DEVBUF);
 	oct->oq[q_no] = NULL;
 create_oq_fail:
-	return -1;
+	return ENOMEM;
 }
 
-/**
- * octep_oq_free_ring_buffers() - Free ring buffers.
- *
- * @oq: Octeon Rx queue data structure.
- *
- * Free receive buffers in unused Rx queue descriptors.
- */
-static void octep_oq_free_ring_buffers(struct octep_oq *oq)
-{
-	struct octep_oq_desc_hw *desc_ring = oq->desc_ring;
-	int  i;
-
-	if (!oq->desc_ring || !oq->buff_info)
-		return;
-
-	for (i = 0; i < oq->max_count; i++)  {
-		if (oq->buff_info[i].page) {
-			dma_unmap_page(oq->dev, desc_ring[i].buffer_ptr,
-				       PAGE_SIZE, DMA_FROM_DEVICE);
-			put_page(oq->buff_info[i].page);
-			oq->buff_info[i].page = NULL;
-			desc_ring[i].buffer_ptr = 0;
-		}
-	}
-	octep_oq_reset_indices(oq);
-}
-
-/**
- * octep_free_oq() - Free Rx queue resources.
- *
- * @oq: Octeon Rx queue data structure.
- *
- * Free all resources of a Rx queue.
- */
-static int octep_free_oq(struct octep_oq *oq)
-{
-	struct octep_device *oct = oq->octep_dev;
-	int q_no = oq->q_no;
-
-	octep_oq_free_ring_buffers(oq);
-
-	vfree(oq->buff_info);
-
-	if (oq->desc_ring)
-		dma_free_coherent(oq->dev,
-				  oq->max_count * OCTEP_OQ_DESC_SIZE,
-				  oq->desc_ring, oq->desc_ring_dma);
-
-	vfree(oq);
-	oct->oq[q_no] = NULL;
-	oct->num_oqs--;
-	return 0;
-}
-
-/**
- * octep_setup_oqs() - setup resources for all Rx queues.
- *
- * @oct: Octeon device private data structure.
- */
-int octep_setup_oqs(struct octep_device *oct)
+int
+octep_setup_oqs(struct octep_device *oct)
 {
 	int i, retval = 0;
 
@@ -264,11 +490,10 @@ int octep_setup_oqs(struct octep_device *oct)
 	for (i = 0; i < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); i++) {
 		retval = octep_setup_oq(oct, i);
 		if (retval) {
-			dev_err(&oct->pdev->dev,
-				"Failed to setup OQ(RxQ)-%d.\n", i);
+			dev_err(oct->pdev, "Failed to setup OQ-%d\n", i);
 			goto oq_setup_err;
 		}
-		dev_dbg(&oct->pdev->dev, "Successfully setup OQ(RxQ)-%d.\n", i);
+		dev_dbg(oct->pdev, "Successfully setup OQ-%d\n", i);
 	}
 
 	return 0;
@@ -278,233 +503,170 @@ oq_setup_err:
 		i--;
 		octep_free_oq(oct->oq[i]);
 	}
+
 	return -1;
 }
 
-/**
- * octep_oq_dbell_init() - Initialize Rx queue doorbell.
- *
- * @oct: Octeon device private data structure.
- *
- * Write number of descriptors to Rx queue doorbell register.
- */
-void octep_oq_dbell_init(struct octep_device *oct)
+int
+octep_iq_process_completions(struct octep_iq *iq, uint16_t budget)
 {
-	int i;
+	struct octep_device *oct = iq->oct_dev;
+	struct octep_tx_buffer *tx_buffer;
+	uint32_t compl_pkts, compl_bytes, compl_sg;
+	uint32_t fi;
+	struct mbuf *mb;
 
-	for (i = 0; i < oct->num_oqs; i++)
-		writel(oct->oq[i]->max_count, oct->oq[i]->pkts_credit_reg);
-}
-
-/**
- * octep_free_oqs() - Free resources of all Rx queues.
- *
- * @oct: Octeon device private data structure.
- */
-void octep_free_oqs(struct octep_device *oct)
-{
-	int i;
-
-	for (i = 0; i < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); i++) {
-		if (!oct->oq[i])
-			continue;
-		octep_free_oq(oct->oq[i]);
-		dev_dbg(&oct->pdev->dev,
-			"Successfully freed OQ(RxQ)-%d.\n", i);
-	}
-}
-
-/**
- * octep_oq_check_hw_for_pkts() - Check for new Rx packets.
- *
- * @oct: Octeon device private data structure.
- * @oq: Octeon Rx queue data structure.
- *
- * Return: packets received after previous check.
- */
-static int octep_oq_check_hw_for_pkts(struct octep_device *oct,
-				      struct octep_oq *oq)
-{
-	u32 pkt_count, new_pkts;
-	u32 last_pkt_count, pkts_pending;
-
-	pkt_count = readl(oq->pkts_sent_reg);
-	if (unlikely(pkt_count == 0xFFFFFFFF)) {
-		writel(pkt_count, oq->pkts_sent_reg);
-		pkt_count = 0;
-		if (printk_ratelimit()) {
-			dev_err(oq->dev, "OQ-%u count read failure\n", oq->q_no);
-		}
+	if (!iq->ifp || !(if_getdrvflags(iq->ifp) & IFF_DRV_RUNNING)) {
 		return 0;
 	}
-	last_pkt_count = READ_ONCE(oq->last_pkt_count);
-	new_pkts = pkt_count - last_pkt_count;
 
-	if (pkt_count < last_pkt_count) {
-		dev_err(oq->dev, "OQ-%u pkt_count(%u) < oq->last_pkt_count(%u)\n",
-			oq->q_no, pkt_count, last_pkt_count);
-	}
+	compl_pkts = 0;
+	compl_bytes = 0;
+	compl_sg = 0;
+	fi = iq->flush_index;
+	iq->octep_read_index = oct->hw_ops.update_iq_read_idx(iq);
 
-	/* Clear the hardware packets counter register if the rx queue is
-	 * being processed continuously with-in a single interrupt and
-	 * reached half its max value.
-	 * this counter is not cleared every time read, to save write cycles.
-	 */
-	if (unlikely(pkt_count > 0xF0000000U)) {
-		writel(pkt_count, oq->pkts_sent_reg);
-		pkt_count = readl(oq->pkts_sent_reg);
-		if (unlikely(pkt_count == 0xFFFFFFFF)) {
-			pkt_count = 0;
-			if (printk_ratelimit()) {
-				dev_err(oq->dev, "OQ-%u count readback failure\n", oq->q_no);
-			}
+	while (budget && (fi != iq->octep_read_index)) {
+		tx_buffer = &iq->buff_info[fi];
+		mb = tx_buffer->mb;
+
+		fi = (fi + 1) & iq->ring_size_mask;
+		compl_bytes += mb->m_pkthdr.len;
+		compl_pkts++;
+		budget--;
+
+		if (!tx_buffer->gather) {
+			bus_dmamap_unload(iq->desc_dma_tag, tx_buffer->map);
+			m_freem(mb);
+			tx_buffer->mb = NULL;
+			continue;
 		}
-		new_pkts += pkt_count;
+
+		compl_sg++;
+		bus_dmamap_unload(iq->sglist_dma_tag, tx_buffer->map);
+		tx_buffer->mb = NULL;
+		m_freem(mb);
 	}
-	WRITE_ONCE(oq->last_pkt_count, pkt_count);
-	pkts_pending = READ_ONCE(oq->pkts_pending);
-	WRITE_ONCE(oq->pkts_pending, (pkts_pending + new_pkts));
-	return new_pkts;
+
+	iq->pkts_processed += compl_pkts;
+	iq->stats.instr_completed += compl_pkts;
+	iq->stats.bytes_sent += compl_bytes;
+	iq->stats.sgentry_sent += compl_sg;
+	iq->flush_index = fi;
+
+	return compl_pkts;
 }
 
-static void __maybe_unused octep_oq_dump_state(struct octep_oq *oq)
-{
-	dev_info(oq->dev, "==== OQ[%d] state ====\n", oq->q_no);
-	dev_info(oq->dev,
-		 "OQ[%d]: pkts_pending = %u; last_pkt_count = %u; host_read_idx = %u\n",
-		 oq->q_no, oq->pkts_pending, oq->last_pkt_count, oq->host_read_idx);
-	dev_info(oq->dev,
-		 "OQ[%d]: refill_count = %u; refill_idx = %u; threshold = %u\n",
-		 oq->q_no, oq->refill_count, oq->host_refill_idx, oq->refill_threshold);
-	dev_info(oq->dev,
-		 "OQ[%d]: ring size = %u; buffer_size = %u; max_single__buffer_size = %u\n",
-		 oq->q_no, oq->max_count, oq->buffer_size, oq->max_single_buffer_size);
-	dev_info(oq->dev,
-		 "OQ[%d] stats: pkts = %llu; bytes = %llu; fails = %llu; delayed = %llu\n",
-		 oq->q_no, oq->stats.packets, oq->stats.bytes,
-		 oq->stats.alloc_failures, oq->stats.pkts_delayed_data);
-}
-
-/**
- * __octep_oq_process_rx() - Process hardware Rx queue and push to stack.
- *
- * @oct: Octeon device private data structure.
- * @oq: Octeon Rx queue data structure.
- * @pkts_to_process: number of packets to be processed.
- *
- * Process the new packets in Rx queue.
- * Packets larger than single Rx buffer arrive in consecutive descriptors.
- * But, count returned by the API only accounts full packets, not fragments.
- *
- * Return: number of packets processed and pushed to stack.
- */
-static int __octep_oq_process_rx(struct octep_device *oct,
-				 struct octep_oq *oq, u16 pkts_to_process)
+static int
+octep_oq_process_rx_internal(struct octep_device *oct, struct octep_oq *oq, uint16_t pkts_to_process)
 {
 	struct octep_oq_resp_hw_ext *resp_hw_ext = NULL;
-	netdev_features_t feat = oq->netdev->features;
 	struct octep_rx_buffer *buff_info;
 	struct octep_oq_resp_hw *resp_hw;
-	u32 pkt, rx_bytes, desc_used;
-	u16 data_offset, rx_ol_flags;
-	struct sk_buff *skb;
-	struct page *page;
-	u32 read_idx, i;
+	uint32_t pkt, rx_bytes, desc_used;
+	uint16_t data_offset, rx_ol_flags;
+	struct mbuf *mb, *head;
+	uint32_t read_idx;
+	int retry;
 
-	read_idx = READ_ONCE(oq->host_read_idx);
+	bus_dmamap_sync(oq->dma_tag, oq->dma_map, BUS_DMASYNC_POSTREAD);
+
+	read_idx = oq->host_read_idx;
 	rx_bytes = 0;
 	desc_used = 0;
+
 	for (pkt = 0; pkt < pkts_to_process; pkt++) {
-		buff_info = (struct octep_rx_buffer *)&oq->buff_info[read_idx];
-		page = buff_info->page;
-		dma_unmap_page(oq->dev, oq->desc_ring[read_idx].buffer_ptr,
-			       PAGE_SIZE, DMA_FROM_DEVICE);
-		resp_hw = page_address(buff_info->page);
-		smp_rmb();
+		buff_info = &oq->buff_info[read_idx];
+		mb = buff_info->buffer;
+		if (!mb) {
+			oq->stats.alloc_failures++;
+			break;
+		}
 
-		if(unlikely(*((volatile uint64_t *)&resp_hw->length) == 0)) {
-			int retry = 100;
+		bus_dmamap_sync(oq->rx_buf_tag, buff_info->dma_map, BUS_DMASYNC_POSTREAD);
+		resp_hw = (struct octep_oq_resp_hw *)buff_info->data;
+		rmb();
 
-			dev_dbg(oq->dev,
-				"OQ[%d]: host_read_idx: %d; Data not ready yet, "
-				"Retry; pkt=%u, pkt_count=%u, pending=%u\n",
-				oq->q_no, oq->host_read_idx,
-				pkt, pkts_to_process, oq->pkts_pending);
-			oq->stats.pkts_delayed_data++;
-			while (retry-- && unlikely(*((volatile uint64_t *)&resp_hw->length) == 0))
-				udelay(50);
-			if (unlikely(!resp_hw->length)) {
-				dev_err(oq->dev, "OQ[%d]: ZERO_PKT_LEN pkt:%d SUSPENDED", oq->q_no, pkt);
-				for (i = 0; i < oct->num_oqs; i++) {
-					oct->oq[i]->suspend = true;
+		if (*((volatile uint64_t *)&resp_hw->length) == 0) {
+			retry = 100;
+			oq->stats.zero_length_packets++;
+
+			while (retry-- && (*((volatile uint64_t *)&resp_hw->length) == 0)) {
+				cpu_spinwait();
+			}
+
+			if (*((volatile uint64_t *)&resp_hw->length) == 0) {
+				dev_err(oq->pdev, "OQ[%d]: ZERO_PKT_LEN pkt:%d SUSPENDED\n", oq->q_no, pkt);
+				for (int i = 0; i < oct->num_oqs; i++) {
+					oct->oq[i]->suspend = 1;
 					oct->hw_ops.disable_iq(oct, i);
 					oct->hw_ops.disable_oq(oct, i);
 				}
-				oq->desc_ring[read_idx].buffer_ptr =
-					dma_map_page(oq->dev, page, 0, PAGE_SIZE, DMA_FROM_DEVICE);
-				/* Stop Tx from stack */
-				netif_tx_stop_all_queues(oct->netdev);
-				netif_carrier_off(oct->netdev);
-				netif_tx_disable(oct->netdev);
+
+				if (oq->ifp) {
+					if_setdrvflagbits(oq->ifp, 0, IFF_DRV_RUNNING);
+				}
+
+				m_freem(mb);
+				buff_info->buffer = NULL;
+				buff_info->data = NULL;
+				buff_info->len = 0;
+
 				return pkt;
 			}
 		}
-		buff_info->page = NULL;
 
-		/* Swap the length field that is in Big-Endian to CPU */
-		buff_info->len = be64_to_cpu(resp_hw->length);
+		buff_info->buffer = NULL;
+		buff_info->data = NULL;
+		buff_info->len = be64toh(resp_hw->length);
+
 		if (oct->conf->fw_info.rx_ol_flags) {
-			/* Extended response header is immediately after
-			 * response header (resp_hw)
-			 */
-			resp_hw_ext = (struct octep_oq_resp_hw_ext *)
-				      (resp_hw + 1);
-			buff_info->len -= OCTEP_OQ_RESP_HW_EXT_SIZE;
-			/* Packet Data is immediately after
-			 * extended response header.
-			 */
-			data_offset = OCTEP_OQ_RESP_HW_SIZE +
-				      OCTEP_OQ_RESP_HW_EXT_SIZE;
+			resp_hw_ext = (struct octep_oq_resp_hw_ext *)(resp_hw + 1);
 			rx_ol_flags = resp_hw_ext->rx_ol_flags;
+			buff_info->len -= OCTEP_OQ_RESP_HW_EXT_SIZE;
+			data_offset = OCTEP_OQ_RESP_HW_SIZE + OCTEP_OQ_RESP_HW_EXT_SIZE;
+
+			if (buff_info->len < 0 || buff_info->len > oq->buffer_size) {
+				oq->stats.unexpected_packets++;
+				m_freem(mb);
+				read_idx = (read_idx + 1) & oq->ring_size_mask;
+				desc_used++;
+				continue;
+			}
 		} else {
-			/* Data is immediately after
-			 * Hardware Rx response header.
-			 */
 			data_offset = OCTEP_OQ_RESP_HW_SIZE;
 			rx_ol_flags = 0;
 		}
 		rx_bytes += buff_info->len;
 
 		if (buff_info->len <= oq->max_single_buffer_size) {
-			skb = build_skb((void *)resp_hw, PAGE_SIZE);
-			skb_reserve(skb, data_offset);
-			skb_put(skb, buff_info->len);
-			read_idx++;
+			mb->m_data += data_offset;
+			mb->m_len = buff_info->len;
+			mb->m_pkthdr.len = buff_info->len;
+			read_idx = (read_idx + 1) & oq->ring_size_mask;
 			desc_used++;
-			if (read_idx == oq->max_count)
-				read_idx = 0;
 		} else {
-			struct skb_shared_info *shinfo;
-			u16 data_len;
+			head = mb;
+			uint32_t data_len = buff_info->len - oq->max_single_buffer_size;
 
-			skb = build_skb((void *)resp_hw, PAGE_SIZE);
-			skb_reserve(skb, data_offset);
-			/* Head fragment includes response header(s);
-			 * subsequent fragments contains only data.
-			 */
-			skb_put(skb, oq->max_single_buffer_size);
-			read_idx++;
+			mb->m_data += data_offset;
+			mb->m_len = oq->max_single_buffer_size;
+			mb->m_pkthdr.len = oq->max_single_buffer_size;
+			read_idx = (read_idx + 1) & oq->ring_size_mask;
 			desc_used++;
-			if (read_idx == oq->max_count)
-				read_idx = 0;
 
-			shinfo = skb_shinfo(skb);
-			data_len = buff_info->len - oq->max_single_buffer_size;
 			while (data_len) {
-				dma_unmap_page(oq->dev, oq->desc_ring[read_idx].buffer_ptr,
-					       PAGE_SIZE, DMA_FROM_DEVICE);
-				buff_info = (struct octep_rx_buffer *)
-					    &oq->buff_info[read_idx];
+				buff_info = &oq->buff_info[read_idx];
+				mb = buff_info->buffer;
+				if (!mb) {
+					oq->stats.alloc_failures++;
+					m_freem(head);
+					break;
+				}
+				buff_info->buffer = NULL;
+				buff_info->data = NULL;
+				buff_info->len = 0;
+
 				if (data_len < oq->buffer_size) {
 					buff_info->len = data_len;
 					data_len = 0;
@@ -513,29 +675,34 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 					data_len -= oq->buffer_size;
 				}
 
-				skb_add_rx_frag(skb, shinfo->nr_frags,
-						buff_info->page, 0,
-						buff_info->len,
-						buff_info->len);
-				buff_info->page = NULL;
-				read_idx++;
+				mb->m_len = buff_info->len;
+				mb->m_pkthdr.len = buff_info->len;
+				m_cat(head, mb);
+				head->m_pkthdr.len += buff_info->len;
+
+				read_idx = (read_idx + 1) & oq->ring_size_mask;
 				desc_used++;
-				if (read_idx == oq->max_count)
-					read_idx = 0;
+			}
+			mb = head;
+			if (data_len) {
+				oq->stats.incomplete_packets++;
+
+				continue;
 			}
 		}
 
-		skb->dev = oq->netdev;
-		skb->protocol =  eth_type_trans(skb, skb->dev);
-		if (feat & NETIF_F_RXCSUM &&
-		    OCTEP_RX_CSUM_VERIFIED(rx_ol_flags))
-			skb->ip_summed = CHECKSUM_UNNECESSARY;
+		mb->m_pkthdr.rcvif = oq->ifp;
+		mb->m_pkthdr.flowid = oq->q_no;
+		ETHER_BPF_MTAP(oq->ifp, mb);
+		if (oq->ifp->if_capenable & IFCAP_RXCSUM && OCTEP_RX_CSUM_VERIFIED(rx_ol_flags))
+			mb->m_pkthdr.csum_flags |= CSUM_IP_CHECKED | CSUM_IP_VALID | CSUM_DATA_VALID;
 		else
-			skb->ip_summed = CHECKSUM_NONE;
-		napi_gro_receive(oq->napi, skb);
+			mb->m_pkthdr.csum_flags = 0;
+
+		(*oq->ifp->if_input)(oq->ifp, mb);
 	}
 
-	WRITE_ONCE(oq->host_read_idx, read_idx);
+	oq->host_read_idx = read_idx;
 	oq->refill_count += desc_used;
 	oq->stats.packets += pkt;
 	oq->stats.bytes += rx_bytes;
@@ -543,55 +710,52 @@ static int __octep_oq_process_rx(struct octep_device *oct,
 	return pkt;
 }
 
-/**
- * octep_oq_process_rx() - Process Rx queue.
- *
- * @oq: Octeon Rx queue data structure.
- * @budget: max number of packets can be processed in one invocation.
- *
- * Check for newly received packets and process them.
- * Keeps checking for new packets until budget is used or no new packets seen.
- *
- * Return: number of packets processed.
- */
-int octep_oq_process_rx(struct octep_oq *oq, int budget)
+
+
+int
+octep_oq_process_rx(struct octep_oq *oq, int budget)
 {
-	u32 pkts_available, pkts_processed, total_pkts_processed;
-	struct octep_device *oct = oq->octep_dev;
-	u32 pkts_pending;
+	struct octep_device *oct = oq->oct_dev;
+	uint32_t pkts_available, pkts_processed, total_pkts_processed = 0;
+	uint32_t pkts_pending;
 
-	pkts_available = 0;
-	pkts_processed = 0;
-	total_pkts_processed = 0;
+	if (oq->suspend) {
+		return 0;
+	}
+
 	while (total_pkts_processed < budget) {
-		if (oq->suspend == true)
-			return 0;
+		if (oq->suspend) {
+			return total_pkts_processed;
+		}
 
-		 /* update pending count only when current one exhausted */
-		pkts_pending = READ_ONCE(oq->pkts_pending);
-		if (pkts_pending == 0)
+		pkts_pending = atomic_load_acq_int(&oq->pkts_pending);
+		if (pkts_pending == 0) {
 			octep_oq_check_hw_for_pkts(oct, oq);
-		pkts_available = min(budget - total_pkts_processed,
-				     oq->pkts_pending);
-		if (!pkts_available)
-			break;
+			pkts_pending = atomic_load_acq_int(&oq->pkts_pending);
+			if (pkts_pending == 0) {
+				break;
+			}
+		}
 
-		pkts_processed = __octep_oq_process_rx(oct, oq,
-						       pkts_available);
-		pkts_pending = READ_ONCE(oq->pkts_pending);
-		WRITE_ONCE(oq->pkts_pending, (pkts_pending - pkts_processed));
+		pkts_available = MIN(budget - total_pkts_processed, pkts_pending);
+		if (!pkts_available) {
+			break;
+		}
+
+		pkts_processed = octep_oq_process_rx_internal(oct, oq, pkts_available);
+		pkts_pending = atomic_load_acq_int(&oq->pkts_pending);
+		atomic_store_rel_int(&oq->pkts_pending, pkts_pending - pkts_processed);
 		total_pkts_processed += pkts_processed;
-		if (oq->suspend == true)
-			return 0;
 	}
 
 	if (oq->refill_count >= oq->refill_threshold) {
-		u32 desc_refilled = octep_oq_refill(oct, oq);
-
-		/* flush pending writes before updating credits */
-		smp_wmb();
-		writel(desc_refilled, oq->pkts_credit_reg);
+		int desc_refilled = octep_oq_refill(oq);
+		if (desc_refilled > 0) {
+			wmb();
+			octep_write_csr(oct, oq->pkts_credit_reg, desc_refilled);
+		}
 	}
 
 	return total_pkts_processed;
 }
+

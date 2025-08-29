@@ -1,10 +1,37 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- #ifndef __OCTEP_CTRL_MBOX_H__
+
+#ifndef __OCTEP_CTRL_MBOX_H__
 #define __OCTEP_CTRL_MBOX_H__
 
 /*              barmem structure
@@ -50,18 +77,23 @@
  * |===========================================|
  */
 
-#define OCTEP_CTRL_MBOX_MAGIC_NUMBER		0xdeaddeadbeefbeefull
+#define OCTEP_CTRL_MBOX_MAGIC_NUMBER        0xdeaddeadbeefbeefull
 
 /* Valid request message */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ	BIT(0)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ    BIT(0)
 /* Valid response message */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_RESP	BIT(1)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_RESP   BIT(1)
 /* Valid notification, no response required */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY	BIT(2)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_NOTIFY BIT(2)
 /* Valid custom message */
-#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_CUSTOM	BIT(3)
+#define OCTEP_CTRL_MBOX_MSG_HDR_FLAG_CUSTOM BIT(3)
 
-#define OCTEP_CTRL_MBOX_MSG_DESC_MAX		4
+#define OCTEP_CTRL_MBOX_MSG_DESC_MAX        4
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 
 enum octep_ctrl_mbox_status {
 	OCTEP_CTRL_MBOX_STATUS_INVALID = 0,
@@ -115,11 +147,11 @@ struct octep_ctrl_mbox_q {
 	/* size of queue buffer */
 	u32 sz;
 	/* producer address in bar mem */
-	u8 __iomem *hw_prod;
+	bus_size_t  hw_prod;
 	/* consumer address in bar mem */
-	u8 __iomem *hw_cons;
+	bus_size_t  hw_cons;
 	/* q base address in bar mem */
-	u8 __iomem *hw_q;
+	bus_size_t  hw_q;
 };
 
 struct octep_ctrl_mbox {
@@ -128,22 +160,21 @@ struct octep_ctrl_mbox {
 	/* size of bar memory */
 	u32 barmem_sz;
 	/* pointer to BAR memory */
-	u8 __iomem *barmem;
+	u32 barmem;
 	/* host-to-fw queue */
 	struct octep_ctrl_mbox_q h2fq;
 	/* fw-to-host queue */
 	struct octep_ctrl_mbox_q f2hq;
-	/* lock for mbox req list */
-	struct mutex list_lock;
 	/* lock for h2fq */
-	struct mutex h2fq_lock;
+	struct mtx h2fq_lock;
 	/* lock for f2hq */
-	struct mutex f2hq_lock;
+	struct mtx f2hq_lock;
 	/* Min control plane version supported by firmware */
 	u32 min_fw_version;
 	/* Max control plane version supported by firmware */
 	u32 max_fw_version;
 };
+
 
 /* Initialize control mbox.
  *
@@ -151,7 +182,7 @@ struct octep_ctrl_mbox {
  *
  * return value: 0 on success, -errno on failure.
  */
-int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox);
+int octep_ctrl_mbox_init(void *dev, struct octep_ctrl_mbox *mbox);
 
 /* Send mbox message.
  *
@@ -161,7 +192,8 @@ int octep_ctrl_mbox_init(struct octep_ctrl_mbox *mbox);
  *
  * return value: 0 on success, -errno on failure.
  */
-int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg);
+int octep_ctrl_mbox_send(void *dev, struct octep_ctrl_mbox *mbox,
+			 struct octep_ctrl_mbox_msg *msg);
 
 /* Retrieve mbox message.
  *
@@ -171,7 +203,8 @@ int octep_ctrl_mbox_send(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_ms
  *
  * return value: 0 on success, -errno on failure.
  */
-int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_msg *msg);
+int octep_ctrl_mbox_recv(void *dev, struct octep_ctrl_mbox *mbox,
+			 struct octep_ctrl_mbox_msg *msg);
 
 /* Uninitialize control mbox.
  *
@@ -179,6 +212,6 @@ int octep_ctrl_mbox_recv(struct octep_ctrl_mbox *mbox, struct octep_ctrl_mbox_ms
  *
  * return value: 0 on success, -errno on failure.
  */
-int octep_ctrl_mbox_uninit(struct octep_ctrl_mbox *mbox);
+int octep_ctrl_mbox_uninit(void *dev, struct octep_ctrl_mbox *mbox);
 
 #endif /* __OCTEP_CTRL_MBOX_H__ */
