@@ -1,26 +1,75 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 
 #ifndef _OCTEP_TX_H_
 #define _OCTEP_TX_H_
 
-#define IQ_SEND_OK          0
-#define IQ_SEND_STOP        1
-#define IQ_SEND_FAILED     -1
+#include "octep_ctrl_mbox.h"
 
-#define TX_BUFTYPE_NONE          0
-#define TX_BUFTYPE_NET           1
-#define TX_BUFTYPE_NET_SG        2
-#define NUM_TX_BUFTYPES          3
+
+#define OCTEP_BR_SIZE 4096
+/* Tx offload flags */
+#define OCTEP_TX_OFFLOAD_VLAN_INSERT    BIT(0)
+#define OCTEP_TX_OFFLOAD_IPV4_CKSUM BIT(1)
+#define OCTEP_TX_OFFLOAD_UDP_CKSUM  BIT(2)
+#define OCTEP_TX_OFFLOAD_TCP_CKSUM  BIT(3)
+#define OCTEP_TX_OFFLOAD_SCTP_CKSUM BIT(4)
+#define OCTEP_TX_OFFLOAD_TCP_TSO    BIT(5)
+#define OCTEP_TX_OFFLOAD_UDP_TSO    BIT(6)
+
+#define OCTEP_TX_OFFLOAD_CKSUM      (OCTEP_TX_OFFLOAD_IPV4_CKSUM | \
+									 OCTEP_TX_OFFLOAD_UDP_CKSUM | \
+									 OCTEP_TX_OFFLOAD_TCP_CKSUM)
+
+#define OCTEP_TX_OFFLOAD_TSO        (OCTEP_TX_OFFLOAD_TCP_TSO | \
+									 OCTEP_TX_OFFLOAD_UDP_TSO)
+
+#define OCTEP_TX_IP_CSUM(flags)     ((flags) & \
+									 (OCTEP_TX_OFFLOAD_IPV4_CKSUM | \
+									  OCTEP_TX_OFFLOAD_TCP_CKSUM | \
+									  OCTEP_TX_OFFLOAD_UDP_CKSUM))
+
+#define OCTEP_TX_TSO(flags)     ((flags) & \
+								 (OCTEP_TX_OFFLOAD_TCP_TSO | \
+								  OCTEP_TX_OFFLOAD_UDP_TSO))
+
+#define MAX_SKB_FRAGS 17
 
 /* Hardware format for Scatter/Gather list */
 struct octep_tx_sglist_desc {
 	u16 len[4];
-	dma_addr_t dma_ptr[4];
+	bus_addr_t dma_ptr[4];
 } __packed;
 
 /* Each Scatter/Gather entry sent to hardwar hold four pointers.
@@ -33,15 +82,74 @@ struct octep_tx_sglist_desc {
 #define OCTEP_SGLIST_SIZE_PER_PKT \
 	(OCTEP_SGLIST_ENTRIES_PER_PKT * sizeof(struct octep_tx_sglist_desc))
 
+
 struct octep_tx_buffer {
-	struct sk_buff *skb;
-	dma_addr_t dma;
+	struct mbuf *mb; /* Replace sk_buff with mbuf */
+	bus_addr_t dma;
 	struct octep_tx_sglist_desc *sglist;
-	dma_addr_t sglist_dma;
+	bus_addr_t sglist_dma;
 	u8 gather;
+	bus_dmamap_t map;
 };
 
 #define OCTEP_IQ_TXBUFF_INFO_SIZE (sizeof(struct octep_tx_buffer))
+
+struct tx_mdata {
+
+	/* offload flags */
+	u16 ol_flags;
+
+	/* gso size */
+	u16 gso_size;
+
+	/* gso flags */
+	u16 gso_segs;
+
+	/* reserved */
+	u16 rsvd1;
+
+	/* reserved */
+	u64 rsvd2;
+} __packed;
+
+/* Hardware Tx Instruction Header */
+struct octep_instr_hdr {
+	/* Data Len */
+	u64 tlen:16;
+
+	/* Reserved */
+	u64 rsvd:20;
+
+	/* PKIND for SDP */
+	u64 pkind:6;
+
+	/* Front Data size */
+	u64 fsz:6;
+
+	/* No. of entries in gather list */
+	u64 gsz:14;
+
+	/* Gather indicator 1=gather*/
+	u64 gather:1;
+
+	/* Reserved3 */
+	u64 reserved3:1;
+} __packed;
+
+struct octep_tx_desc_hw {
+	bus_addr_t dptr;
+	union {
+		struct octep_instr_hdr ih; /* Assume this is defined elsewhere */
+		u64 ih64;
+	};
+	union {
+		u64 txm64[2];
+		struct tx_mdata txm;
+	};
+	u64 exthdr[4];
+} __packed;
+
+#define OCTEP_IQ_DESC_SIZE (sizeof(struct octep_tx_desc_hw))
 
 /* Hardware interface Tx statistics */
 struct octep_iface_tx_stats {
@@ -79,16 +187,16 @@ struct octep_iface_tx_stats {
 	/* Packets sent with an octet count == 64 */
 	u64 hist_eq64;
 
-	/* Packets sent with an octet count of 65–127 */
+	/* Packets sent with an octet count of 65▒~@~S127 */
 	u64 hist_65to127;
 
-	/* Packets sent with an octet count of 128–255 */
+	/* Packets sent with an octet count of 128▒~@~S255 */
 	u64 hist_128to255;
 
-	/* Packets sent with an octet count of 256–511 */
+	/* Packets sent with an octet count of 256▒~@~S511 */
 	u64 hist_256to511;
 
-	/* Packets sent with an octet count of 512–1023 */
+	/* Packets sent with an octet count of 512▒~@~S1023 */
 	u64 hist_512to1023;
 
 	/* Packets sent with an octet count of 1024-1518 */
@@ -128,168 +236,75 @@ struct octep_iq_stats {
 
 	/* Number of times the queue is restarted */
 	u64 restart_cnt;
+
+	u64 instr_processed;
 };
 
-/* The instruction (input) queue.
- * The input queue is used to post raw (instruction) mode data or packet
- * data to Octeon device from the host. Each input queue (up to 4) for
- * a Octeon device has one such structure to represent it.
- */
 struct octep_iq {
-	u32 q_no;
-
-	struct octep_device *octep_dev;
-	struct net_device *netdev;
-	struct device *dev;
-	struct netdev_queue *netdev_q;
-
+	uint32_t q_no;
+	struct octep_device    *oct_dev;
+	struct ifnet *ifp;
+	device_t dev;
 	/* Index in input ring where driver should write the next packet */
-	u16 host_write_index;
-
+	uint16_t host_write_index;
 	/* Index in input ring where Octeon is expected to read next packet */
-	u16 octep_read_index;
+	uint16_t octep_read_index;
 
 	/* This index aids in finding the window in the queue where Octeon
 	 * has read the commands.
 	 */
-	u16 flush_index;
+	uint16_t flush_index;
 
 	/* Statistics for this input queue. */
 	struct octep_iq_stats stats;
 
-	/* Pointer to the Virtual Base addr of the input ring. */
+	/* DMA mapped base address of the input descriptor ring. */
+	uint64_t               desc_ring_dma;
 	struct octep_tx_desc_hw *desc_ring;
 
-	/* DMA mapped base address of the input descriptor ring. */
-	dma_addr_t desc_ring_dma;
-
-	/* Info of Tx buffers pending completion. */
-	struct octep_tx_buffer *buff_info;
-
-	/* Base pointer to Scatter/Gather lists for all ring descriptors. */
-	struct octep_tx_sglist_desc *sglist;
-
-	/* DMA mapped addr of Scatter Gather Lists */
-	dma_addr_t sglist_dma;
-
 	/* Octeon doorbell register for the ring. */
-	u8 __iomem *doorbell_reg;
+	bus_size_t doorbell_reg;
 
 	/* Octeon instruction count register for this ring. */
-	u8 __iomem *inst_cnt_reg;
+	bus_size_t inst_cnt_reg;
+
 
 	/* interrupt level register for this ring */
-	u8 __iomem *intr_lvl_reg;
+	bus_size_t intr_lvl_reg;
 
 	/* Maximum no. of instructions in this queue. */
-	u32 max_count;
-	u32 ring_size_mask;
+	uint32_t max_count;
+	uint32_t ring_size_mask;
 
-	u32 pkt_in_done;
-	u32 pkts_processed;
+	uint32_t pkt_in_done;
+	uint32_t pkts_processed;
 
-	u32 status;
+	volatile int        instr_pending; /* Added for pending instructions */
+	struct mtx lock;       /* Added for general locking */
+	struct mtx post_lock;  /* Command posting lock */
+	struct mtx iq_flush_running_lock; /* Flush lock */
+
+	uint32_t status;
 
 	/* Number of instructions pending to be posted to Octeon. */
-	u32 fill_cnt;
+	uint32_t fill_cnt;
 
 	/* The max. number of instructions that can be held pending by the
 	 * driver before ringing doorbell.
 	 */
-	u32 fill_threshold;
+	uint32_t fill_threshold;
+
+	bus_dma_tag_t desc_dma_tag; /* DMA tags for memory management */
+	bus_dmamap_t desc_dmamap;
+	bus_dma_tag_t sglist_dma_tag;
+	bus_dmamap_t sglist_dmamap;
+	struct octep_tx_sglist_desc *sglist;
+	bus_addr_t sglist_dma;
+	struct octep_tx_buffer *buff_info;
+	struct buf_ring *br;              /* Buffer ring for packet queuing */
+	struct mtx enq_lock;              /* Mutex for buf_ring enqueue/dequeue */
+	bus_dma_tag_t tx_dma_tag;
 };
 
-/* Hardware Tx Instruction Header */
-struct octep_instr_hdr {
-	/* Data Len */
-	u64 tlen:16;
 
-	/* Reserved */
-	u64 rsvd:20;
-
-	/* PKIND for SDP */
-	u64 pkind:6;
-
-	/* Front Data size */
-	u64 fsz:6;
-
-	/* No. of entries in gather list */
-	u64 gsz:14;
-
-	/* Gather indicator 1=gather*/
-	u64 gather:1;
-
-	/* Reserved3 */
-	u64 reserved3:1;
-} __packed;
-
-/* Tx offload flags */
-#define OCTEP_TX_OFFLOAD_VLAN_INSERT	BIT(0)
-#define OCTEP_TX_OFFLOAD_IPV4_CKSUM	BIT(1)
-#define OCTEP_TX_OFFLOAD_UDP_CKSUM	BIT(2)
-#define OCTEP_TX_OFFLOAD_TCP_CKSUM	BIT(3)
-#define OCTEP_TX_OFFLOAD_SCTP_CKSUM	BIT(4)
-#define OCTEP_TX_OFFLOAD_TCP_TSO	BIT(5)
-#define OCTEP_TX_OFFLOAD_UDP_TSO	BIT(6)
-
-#define OCTEP_TX_OFFLOAD_CKSUM		(OCTEP_TX_OFFLOAD_IPV4_CKSUM | \
-					 OCTEP_TX_OFFLOAD_UDP_CKSUM | \
-					 OCTEP_TX_OFFLOAD_TCP_CKSUM)
-
-#define OCTEP_TX_OFFLOAD_TSO		(OCTEP_TX_OFFLOAD_TCP_TSO | \
-					 OCTEP_TX_OFFLOAD_UDP_TSO)
-
-#define OCTEP_TX_IP_CSUM(flags)		((flags) & \
-					 (OCTEP_TX_OFFLOAD_IPV4_CKSUM | \
-					  OCTEP_TX_OFFLOAD_TCP_CKSUM | \
-					  OCTEP_TX_OFFLOAD_UDP_CKSUM))
-
-#define OCTEP_TX_TSO(flags)		((flags) & \
-					 (OCTEP_TX_OFFLOAD_TCP_TSO | \
-					  OCTEP_TX_OFFLOAD_UDP_TSO))
-
-struct tx_mdata {
-
-	/* offload flags */
-	u16 ol_flags;
-
-	/* gso size */
-	u16 gso_size;
-
-	/* gso flags */
-	u16 gso_segs;
-
-	/* reserved */
-	u16 rsvd1;
-
-	/* reserved */
-	u64 rsvd2;
-} __packed;
-
-/* 64-byte Tx instruction format.
- * Format of instruction for a 64-byte mode input queue.
- *
- * only first 16-bytes (dptr and ih) are mandatory; rest are optional
- * and filled by the driver based on firmware/hardware capabilities.
- * These optional headers together called Front Data and its size is
- * described by ih->fsz.
- */
-struct octep_tx_desc_hw {
-	/* Pointer where the input data is available. */
-	u64 dptr;
-
-	/* Instruction Header. */
-	union {
-		struct octep_instr_hdr ih;
-		u64 ih64;
-	};
-	union  {
-		u64 txm64[2];
-		struct tx_mdata txm;
-	};
-	/* Additional headers available in a 64-byte instruction. */
-	u64 exthdr[4];
-} __packed;
-
-#define OCTEP_IQ_DESC_SIZE (sizeof(struct octep_tx_desc_hw))
-#endif /* _OCTEP_TX_H_ */
+#endif

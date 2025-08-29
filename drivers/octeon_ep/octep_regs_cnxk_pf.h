@@ -1,8 +1,34 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef _OCTEP_REGS_CNXK_PF_H_
@@ -318,49 +344,49 @@
 #define	   CNXK_SDP_EPF_PP_VF_RINT_ENA_W1S_START    0x209C0
 
 #define	   CNXK_SDP_EPF_MBOX_RINT(index)		\
-		(CNXK_SDP_EPF_MBOX_RINT_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_MBOX_RINT_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_MBOX_RINT_W1S(index)		\
-		(CNXK_SDP_EPF_MBOX_RINT_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_MBOX_RINT_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_MBOX_RINT_ENA_W1C(index)	\
-		(CNXK_SDP_EPF_MBOX_RINT_ENA_W1C_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_MBOX_RINT_ENA_W1C_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_MBOX_RINT_ENA_W1S(index)	\
-		(CNXK_SDP_EPF_MBOX_RINT_ENA_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_MBOX_RINT_ENA_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 
 #define	   CNXK_SDP_EPF_VFIRE_RINT(index)		\
-		(CNXK_SDP_EPF_VFIRE_RINT_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFIRE_RINT_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_VFIRE_RINT_W1S(index)		\
-		(CNXK_SDP_EPF_VFIRE_RINT_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFIRE_RINT_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_VFIRE_RINT_ENA_W1C(index)	\
-		(CNXK_SDP_EPF_VFIRE_RINT_ENA_W1C_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFIRE_RINT_ENA_W1C_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_VFIRE_RINT_ENA_W1S(index)	\
-		(CNXK_SDP_EPF_VFIRE_RINT_ENA_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFIRE_RINT_ENA_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 
 #define	   CNXK_SDP_EPF_VFORE_RINT(index)		\
-		(CNXK_SDP_EPF_VFORE_RINT_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFORE_RINT_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_VFORE_RINT_W1S(index)		\
-		(CNXK_SDP_EPF_VFORE_RINT_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFORE_RINT_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_VFORE_RINT_ENA_W1C(index)	\
-		(CNXK_SDP_EPF_VFORE_RINT_ENA_W1C_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFORE_RINT_ENA_W1C_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_VFORE_RINT_ENA_W1S(index)	\
-		(CNXK_SDP_EPF_VFORE_RINT_ENA_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_VFORE_RINT_ENA_W1S_START + ((index) * CNXK_BIT_ARRAY_OFFSET))
 
 #define	   CNXK_SDP_EPF_DMA_VF_RINT(index)		\
-		(CNXK_SDP_EPF_DMA_VF_RINT_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_DMA_VF_RINT_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_DMA_VF_RINT_W1S(index)		\
-		(CNXK_SDP_EPF_DMA_VF_RINT_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_DMA_VF_RINT_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1C(index)	\
-		(CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1C_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1C_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1S(index)	\
-		(CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 
 #define	   CNXK_SDP_EPF_PP_VF_RINT(index)		\
-		(CNXK_SDP_EPF_PP_VF_RINT_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_PP_VF_RINT_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_PP_VF_RINT_W1S(index)		\
-		(CNXK_SDP_EPF_PP_VF_RINT_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_PP_VF_RINT_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_PP_VF_RINT_ENA_W1C(index)	\
-		(CNXK_SDP_EPF_PP_VF_RINT_ENA_W1C_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_PP_VF_RINT_ENA_W1C_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 #define	   CNXK_SDP_EPF_PP_VF_RINT_ENA_W1S(index)	\
-		(CNXK_SDP_EPF_PP_VF_RINT_ENA_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
+	(CNXK_SDP_EPF_PP_VF_RINT_ENA_W1S_START + ((index) + CNXK_BIT_ARRAY_OFFSET))
 
 /*------------------ Interrupt Masks ----------------*/
 #define	   CNXK_INTR_R_SEND_ISM       BIT_ULL(63)
@@ -377,13 +403,13 @@
 #define    CNXK_SDP_MAC_PF_RING_CTL_START    0x2C000
 
 #define	   CNXK_SDP_EPVF_RING(ring)		\
-		(CNXK_SDP_EPVF_RING_START + ((ring) * CNXK_EPVF_RING_OFFSET))
+	(CNXK_SDP_EPVF_RING_START + ((ring) * CNXK_EPVF_RING_OFFSET))
 #define	   CNXK_SDP_IN_RING_TB_MAP(ring)	\
-		(CNXK_SDP_N_RING_TB_MAP_START + ((ring) * CNXK_EPVF_RING_OFFSET))
+	(CNXK_SDP_N_RING_TB_MAP_START + ((ring) * CNXK_EPVF_RING_OFFSET))
 #define	   CNXK_SDP_IN_RATE_LIMIT(ring)		\
-		(CNXK_SDP_IN_RATE_LIMIT_START + ((ring) * CNXK_EPVF_RING_OFFSET))
+	(CNXK_SDP_IN_RATE_LIMIT_START + ((ring) * CNXK_EPVF_RING_OFFSET))
 #define	   CNXK_SDP_MAC_PF_RING_CTL(mac)	\
-		(CNXK_SDP_MAC_PF_RING_CTL_START + ((mac) * CNXK_MAC_OFFSET))
+	(CNXK_SDP_MAC_PF_RING_CTL_START + ((mac) * CNXK_MAC_OFFSET))
 
 #define    CNXK_SDP_MAC_PF_RING_CTL_NPFS(val)  ((val) & 0x3)
 #define    CNXK_SDP_MAC_PF_RING_CTL_SRN(val)   (((val) >> 8) & 0x7F)
@@ -401,10 +427,10 @@
 #define FW_STATUS_READY 1ULL
 #define FW_STATUS_RUNNING      2ULL
 #define CNXK_PEMX_PFX_CSX_PFCFGX(pem, pf, offset)      ((0x8e0000008000 | (uint64_t)pem << 36 \
-						| pf << 18 \
-						| ((offset >> 16) & 1) << 16 \
-						| (offset >> 3) << 3) \
-						+ (((offset >> 2) & 1) << 2))
+							 | pf << 18 \
+							 | ((offset >> 16) & 1) << 16 \
+							 | (offset >> 3) << 3) \
+							 + (((offset >> 2) & 1) << 2))
 
 /* Register defines for use with CNXK_PEMX_PFX_CSX_PFCFGX */
 #define CNXK_PCIEEP_VSECST_CTL  0x418

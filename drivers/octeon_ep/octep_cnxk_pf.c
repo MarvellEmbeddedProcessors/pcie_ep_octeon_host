@@ -1,21 +1,51 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <linux/pci.h>
-#include <linux/netdevice.h>
-#include <linux/etherdevice.h>
-
-#include "octep_config.h"
+#include "octep_bsd.h"
 #include "octep_main.h"
+#include "octep_config.h"
 #include "octep_regs_cnxk_pf.h"
+#include "octep_ctrl_net.h"
 
 /* We will support 128 pf's in control mbox */
-#define CTRL_MBOX_MAX_PF	128
-#define CTRL_MBOX_SZ		(size_t)(0x400000 / CTRL_MBOX_MAX_PF)
+#define CTRL_MBOX_MAX_PF    128
+#define CTRL_MBOX_SZ        (size_t)(0x400000 / CTRL_MBOX_MAX_PF)
+
+#define PCI_DEVFN(slot, func)   ((((slot) & 0x1f) << 3) | ((func) & 0x07))
+#define PCI_SLOT(devfn)         (((devfn) >> 3) & 0x1f)
+#define PCI_FUNC(devfn)         ((devfn) & 0x07)
+#define PCI_SRIOV_FUNC_LINK 0x12    /* Function Dependency Link */
+#define PCI_EXT_CAP_ID_SRIOV    0x10    /* Single Root I/O Virtualization */
 
 /* Names of Hardware non-queue generic interrupts */
 static char *cnxk_non_ioq_msix_names[] = {
@@ -56,80 +86,13 @@ static char *cnxk_non_ioq_msix_names[] = {
 	"octeon_ep"
 };
 
-/* Dump useful hardware CSRs for debug purpose */
-static void cnxk_dump_regs(struct octep_device *oct, int qno)
-{
-	struct device *dev = &oct->pdev->dev;
-
-	dev_info(dev, "IQ-%d register dump\n", qno);
-	dev_info(dev, "R[%d]_IN_INSTR_DBELL[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_INSTR_DBELL(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_INSTR_DBELL(qno)));
-	dev_info(dev, "R[%d]_IN_CONTROL[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_CONTROL(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_CONTROL(qno)));
-	dev_info(dev, "R[%d]_IN_ENABLE[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_ENABLE(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_ENABLE(qno)));
-	dev_info(dev, "R[%d]_IN_INSTR_BADDR[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_INSTR_BADDR(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_INSTR_BADDR(qno)));
-	dev_info(dev, "R[%d]_IN_INSTR_RSIZE[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_INSTR_RSIZE(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_INSTR_RSIZE(qno)));
-	dev_info(dev, "R[%d]_IN_CNTS[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_CNTS(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_CNTS(qno)));
-	dev_info(dev, "R[%d]_IN_INT_LEVELS[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_INT_LEVELS(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_INT_LEVELS(qno)));
-	dev_info(dev, "R[%d]_IN_PKT_CNT[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_PKT_CNT(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_PKT_CNT(qno)));
-	dev_info(dev, "R[%d]_IN_BYTE_CNT[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_IN_BYTE_CNT(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_IN_BYTE_CNT(qno)));
-
-	dev_info(dev, "OQ-%d register dump\n", qno);
-	dev_info(dev, "R[%d]_OUT_SLIST_DBELL[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_SLIST_DBELL(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_DBELL(qno)));
-	dev_info(dev, "R[%d]_OUT_CONTROL[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_CONTROL(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_CONTROL(qno)));
-	dev_info(dev, "R[%d]_OUT_ENABLE[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_ENABLE(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_ENABLE(qno)));
-	dev_info(dev, "R[%d]_OUT_SLIST_BADDR[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_SLIST_BADDR(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(qno)));
-	dev_info(dev, "R[%d]_OUT_SLIST_RSIZE[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_SLIST_RSIZE(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(qno)));
-	dev_info(dev, "R[%d]_OUT_CNTS[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_CNTS(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_CNTS(qno)));
-	dev_info(dev, "R[%d]_OUT_INT_LEVELS[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_INT_LEVELS(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_INT_LEVELS(qno)));
-	dev_info(dev, "R[%d]_OUT_PKT_CNT[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_PKT_CNT(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_PKT_CNT(qno)));
-	dev_info(dev, "R[%d]_OUT_BYTE_CNT[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_OUT_BYTE_CNT(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_OUT_BYTE_CNT(qno)));
-	dev_info(dev, "R[%d]_ERR_TYPE[0x%llx]: 0x%016llx\n",
-		 qno, CNXK_SDP_R_ERR_TYPE(qno),
-		 octep_read_csr64(oct, CNXK_SDP_R_ERR_TYPE(qno)));
-}
-
 /* Reset Hardware Tx queue */
 static int cnxk_reset_iq(struct octep_device *oct, int q_no)
 {
 	struct octep_config *conf = oct->conf;
 	u64 val = 0ULL;
 
-	dev_dbg(&oct->pdev->dev, "Reset PF IQ-%d\n", q_no);
+	dev_dbg(oct->pdev, "Reset PF IQ-%d\n", q_no);
 
 	/* Get absolute queue number */
 	q_no += conf->pf_ring_cfg.srn;
@@ -175,10 +138,9 @@ static void cnxk_reset_oq(struct octep_device *oct, int q_no)
 /* Reset all hardware Tx/Rx queues */
 static void octep_reset_io_queues_cnxk_pf(struct octep_device *oct)
 {
-	struct pci_dev *pdev = oct->pdev;
 	int q;
 
-	dev_dbg(&pdev->dev, "Reset OCTEP_CNXK PF IO Queues\n");
+	dev_dbg(oct->pdev, "Reset OCTEP_CNXK PF IO Queues\n");
 
 	for (q = 0; q < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); q++) {
 		cnxk_reset_iq(oct, q);
@@ -189,19 +151,16 @@ static void octep_reset_io_queues_cnxk_pf(struct octep_device *oct)
 /* Initialize windowed addresses to access some hardware registers */
 static void octep_setup_pci_window_regs_cnxk_pf(struct octep_device *oct)
 {
-	u8 __iomem *bar0_pciaddr = oct->mmio[0].hw_addr;
-
-	oct->pci_win_regs.pci_win_wr_addr = (u8 __iomem *)(bar0_pciaddr + CNXK_SDP_WIN_WR_ADDR64);
-	oct->pci_win_regs.pci_win_rd_addr = (u8 __iomem *)(bar0_pciaddr + CNXK_SDP_WIN_RD_ADDR64);
-	oct->pci_win_regs.pci_win_wr_data = (u8 __iomem *)(bar0_pciaddr + CNXK_SDP_WIN_WR_DATA64);
-	oct->pci_win_regs.pci_win_rd_data = (u8 __iomem *)(bar0_pciaddr + CNXK_SDP_WIN_RD_DATA64);
+	oct->reg_list.pci_win_wr_addr = CNXK_SDP_WIN_WR_ADDR64;
+	oct->reg_list.pci_win_rd_addr = CNXK_SDP_WIN_RD_ADDR64;
+	oct->reg_list.pci_win_wr_data = CNXK_SDP_WIN_WR_DATA64;
+	oct->reg_list.pci_win_rd_data = CNXK_SDP_WIN_RD_DATA64;
 }
 
 /* Configure Hardware mapping: inform hardware which rings belong to PF. */
 static void octep_configure_ring_mapping_cnxk_pf(struct octep_device *oct)
 {
 	struct octep_config *conf = oct->conf;
-	struct pci_dev *pdev = oct->pdev;
 	u64 pf_srn = CFG_GET_PORTS_PF_SRN(oct->conf);
 	int q;
 
@@ -214,8 +173,8 @@ static void octep_configure_ring_mapping_cnxk_pf(struct octep_device *oct)
 		octep_write_csr64(oct, CNXK_SDP_EPVF_RING(pf_srn + q), regval);
 
 		regval = octep_read_csr64(oct, CNXK_SDP_EPVF_RING(pf_srn + q));
-		dev_dbg(&pdev->dev, "Write SDP_EPVF_RING[0x%llx] = 0x%llx\n",
-			CNXK_SDP_EPVF_RING(pf_srn + q), regval);
+		dev_dbg(oct->pdev,"Write SDP_EPVF_RING[0x%llx] = 0x%lx\n",
+				 CNXK_SDP_EPVF_RING(pf_srn + q), regval);
 	}
 }
 
@@ -223,7 +182,6 @@ static void octep_configure_ring_mapping_cnxk_pf(struct octep_device *oct)
 static void octep_init_config_cnxk_pf(struct octep_device *oct)
 {
 	struct octep_config *conf = oct->conf;
-	struct pci_dev *pdev = oct->pdev;
 	u64 val;
 	int pos;
 	u8 link = 0;
@@ -232,7 +190,7 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 	 * PF ring count, number of VFs and rings per VF supported
 	 */
 	val = octep_read_csr64(oct, CNXK_SDP_EPF_RINFO);
-	dev_info(&pdev->dev, "SDP_EPF_RINFO[0x%x]:0x%llx\n", CNXK_SDP_EPF_RINFO, val);
+	dev_dbg(oct->pdev, "SDP_EPF_RINFO[0x%x]:0x%lx\n", CNXK_SDP_EPF_RINFO, val);
 	conf->sriov_cfg.max_rings_per_vf = CNXK_SDP_EPF_RINFO_RPVF(val);
 	conf->sriov_cfg.active_rings_per_vf = conf->sriov_cfg.max_rings_per_vf;
 	conf->sriov_cfg.max_vfs = CNXK_SDP_EPF_RINFO_NVFS(val);
@@ -240,18 +198,19 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 	conf->sriov_cfg.vf_srn = CNXK_SDP_EPF_RINFO_SRN(val);
 
 	val = octep_read_csr64(oct, CNXK_SDP_MAC_PF_RING_CTL(oct->pcie_port));
-	dev_info(&pdev->dev, "SDP_MAC_PF_RING_CTL[%d]:0x%llx\n", oct->pcie_port, val);
+	dev_dbg(oct->pdev, "SDP_MAC_PF_RING_CTL[%d]:0x%lx\n", oct->pcie_port, val);
 	conf->pf_ring_cfg.srn =  CNXK_SDP_MAC_PF_RING_CTL_SRN(val);
 	conf->pf_ring_cfg.max_io_rings = CNXK_SDP_MAC_PF_RING_CTL_RPPF(val);
 	conf->pf_ring_cfg.active_io_rings = conf->pf_ring_cfg.max_io_rings;
-	dev_info(&pdev->dev, "pf_srn=%u rpvf=%u nvfs=%u rppf=%u\n",
-		 conf->pf_ring_cfg.srn, conf->sriov_cfg.active_rings_per_vf,
-		 conf->sriov_cfg.active_vfs, conf->pf_ring_cfg.active_io_rings);
+	dev_info(oct->pdev, "pf_srn=%u rpvf=%u nvfs=%u rppf=%u\n",
+			 conf->pf_ring_cfg.srn, conf->sriov_cfg.active_rings_per_vf,
+			 conf->sriov_cfg.active_vfs, conf->pf_ring_cfg.active_io_rings);
 
 	conf->iq.num_descs = OCTEP_IQ_MAX_DESCRIPTORS;
 	conf->iq.instr_type = OCTEP_64BYTE_INSTR;
 	conf->iq.db_min = OCTEP_DB_MIN;
 	conf->iq.intr_threshold = OCTEP_IQ_INTR_THRESHOLD;
+
 
 	conf->oq.num_descs = OCTEP_OQ_MAX_DESCRIPTORS;
 	conf->oq.buf_size = OCTEP_OQ_BUF_SIZE;
@@ -264,16 +223,17 @@ static void octep_init_config_cnxk_pf(struct octep_device *oct)
 	conf->msix_cfg.ioq_msix = conf->pf_ring_cfg.active_io_rings;
 	conf->msix_cfg.non_ioq_msix_names = cnxk_non_ioq_msix_names;
 
-	pos = pci_find_ext_capability(oct->pdev, PCI_EXT_CAP_ID_SRIOV);
-	if (pos) {
-		pci_read_config_byte(oct->pdev,
-				     pos + PCI_SRIOV_FUNC_LINK,
-				     &link);
-		link = PCI_DEVFN(PCI_SLOT(oct->pdev->devfn), link);
+	if (pci_find_extcap(oct->pdev, PCI_EXT_CAP_ID_SRIOV, &pos) == 0) {
+		link = pci_read_config(oct->pdev, pos + PCI_SRIOV_FUNC_LINK, 1);
+		link = PCI_DEVFN(PCI_SLOT(pci_get_slot(oct->pdev)), link);
 	}
-	conf->ctrl_mbox_cfg.barmem_addr = (void __iomem *)oct->mmio[2].hw_addr +
-					   CNXK_PEM_BAR4_INDEX_OFFSET +
-					   (link * CTRL_MBOX_SZ);
+	else {
+		dev_info(oct->pdev,"cannot find SR-IOV PCIe cap\n");
+		link = 0;
+	}
+
+	conf->ctrl_mbox_cfg.barmem_addr = CNXK_PEM_BAR4_INDEX_OFFSET +
+		(link * CTRL_MBOX_SZ);
 
 	conf->fw_info.hb_interval = OCTEP_DEFAULT_FW_HB_INTERVAL;
 	conf->fw_info.hb_miss_count = OCTEP_DEFAULT_FW_HB_MISS_COUNT;
@@ -304,23 +264,21 @@ static void octep_setup_iq_regs_cnxk_pf(struct octep_device *oct, int iq_no)
 
 	/* Write the start of the input queue's ring and its size  */
 	octep_write_csr64(oct, CNXK_SDP_R_IN_INSTR_BADDR(iq_no),
-			  iq->desc_ring_dma);
+					  iq->desc_ring_dma);
 	octep_write_csr64(oct, CNXK_SDP_R_IN_INSTR_RSIZE(iq_no),
-			  iq->max_count);
+					  iq->max_count);
+
 
 	/* Remember the doorbell & instruction count register addr
 	 * for this queue
 	 */
-	iq->doorbell_reg = oct->mmio[0].hw_addr +
-			   CNXK_SDP_R_IN_INSTR_DBELL(iq_no);
-	iq->inst_cnt_reg = oct->mmio[0].hw_addr +
-			   CNXK_SDP_R_IN_CNTS(iq_no);
-	iq->intr_lvl_reg = oct->mmio[0].hw_addr +
-			   CNXK_SDP_R_IN_INT_LEVELS(iq_no);
+	iq->doorbell_reg = CNXK_SDP_R_IN_INSTR_DBELL(iq_no);
+	iq->inst_cnt_reg = CNXK_SDP_R_IN_CNTS(iq_no);
+	iq->intr_lvl_reg = CNXK_SDP_R_IN_INT_LEVELS(iq_no);
 
 	/* Store the current instruction counter (used in flush_iq calculation) */
-	reset_instr_cnt = readl(iq->inst_cnt_reg);
-	writel(reset_instr_cnt, iq->inst_cnt_reg);
+	reset_instr_cnt = octep_read_csr(oct, iq->inst_cnt_reg);
+	octep_write_csr(oct, iq->inst_cnt_reg, reset_instr_cnt);
 
 	/* INTR_THRESHOLD is set to max(FFFFFFFF) to disable the INTR */
 	reg_val = CFG_GET_IQ_INTR_THRESHOLD(oct->conf) & 0xffffffff;
@@ -347,7 +305,7 @@ static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 	}
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_WMARK(oq_no),  oq->max_count);
 	/* Wait for WMARK to get applied */
-	udelay(10);
+	DELAY(10);
 
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no), oq->desc_ring_dma);
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(oq_no), oq->max_count);
@@ -357,8 +315,8 @@ static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 			if (reg_ba_val == UINT64_MAX)
 				return -1;
 			octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no), oq->desc_ring_dma);
-			 octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(oq_no), oq->max_count);
-			 reg_ba_val = octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no));
+			octep_write_csr64(oct, CNXK_SDP_R_OUT_SLIST_RSIZE(oq_no), oq->max_count);
+			reg_ba_val = octep_read_csr64(oct, CNXK_SDP_R_OUT_SLIST_BADDR(oq_no));
 		} while (reg_ba_val != oq->desc_ring_dma);
 	}
 
@@ -385,13 +343,12 @@ static int octep_setup_oq_regs_cnxk_pf(struct octep_device *oct, int oq_no)
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_CONTROL(oq_no), oq_ctl);
 
 	/* Get the mapped address of the pkt_sent and pkts_credit regs */
-	oq->pkts_sent_reg = oct->mmio[0].hw_addr + CNXK_SDP_R_OUT_CNTS(oq_no);
-	oq->pkts_credit_reg = oct->mmio[0].hw_addr +
-			      CNXK_SDP_R_OUT_SLIST_DBELL(oq_no);
+	oq->pkts_sent_reg = CNXK_SDP_R_OUT_CNTS(oq_no);
+	oq->pkts_credit_reg = CNXK_SDP_R_OUT_SLIST_DBELL(oq_no);
 
 	time_threshold = CFG_GET_OQ_INTR_TIME(oct->conf);
 	reg_val = ((u64)time_threshold << 32) |
-		  CFG_GET_OQ_INTR_PKT(oct->conf);
+		CFG_GET_OQ_INTR_PKT(oct->conf);
 	octep_write_csr64(oct, CNXK_SDP_R_OUT_INT_LEVELS(oq_no), reg_val);
 
 	/* set watermark for backpressure */
@@ -409,12 +366,10 @@ static void octep_setup_mbox_regs_cnxk_pf(struct octep_device *oct, int q_no)
 	struct octep_mbox *mbox = oct->mbox[q_no];
 
 	/* PF to VF DATA reg. PF writes into this reg */
-	mbox->pf_vf_data_reg = oct->mmio[0].hw_addr +
-				CNXK_SDP_MBOX_PF_VF_DATA(q_no);
+	mbox->pf_vf_data_reg = CNXK_SDP_MBOX_PF_VF_DATA(q_no);
 
 	/* VF to PF DATA reg. PF reads from this reg */
-	mbox->vf_pf_data_reg = oct->mmio[0].hw_addr +
-				CNXK_SDP_MBOX_VF_PF_DATA(q_no);
+	mbox->vf_pf_data_reg =  CNXK_SDP_MBOX_VF_PF_DATA(q_no);
 
 }
 
@@ -434,10 +389,11 @@ static void octep_poll_pfvf_mailbox_cnxk_pf(struct octep_device *oct)
 				continue;
 
 			if (!oct->mbox[vf_mbox_queue]) {
-				dev_err(&oct->pdev->dev, "bad mbox vf %d\n", vf);
+				dev_err(oct->pdev,"bad mbox vf %d\n", vf);
 				continue;
 			}
-			schedule_work(&oct->mbox[vf_mbox_queue]->wk.work);
+			taskqueue_enqueue(oct->mbox[vf_mbox_queue]->wk.tq, 
+							  &oct->mbox[vf_mbox_queue]->wk.work);
 		}
 		if (reg0)
 			octep_write_csr64(oct, CNXK_SDP_EPF_MBOX_RINT(0), reg0);
@@ -446,12 +402,12 @@ static void octep_poll_pfvf_mailbox_cnxk_pf(struct octep_device *oct)
 	}
 }
 
-static irqreturn_t octep_pfvf_mbox_intr_handler_cnxk_pf(void *dev)
+static int octep_pfvf_mbox_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
 
 	octep_poll_pfvf_mailbox_cnxk_pf(oct);
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Poll OEI events like heartbeat */
@@ -459,28 +415,35 @@ static void octep_poll_oei_cnxk_pf(struct octep_device *oct)
 {
 	u64 reg0;
 	int handled = 0;
+	int status;
 
 	/* Check for OEI INTR */
 	reg0 = octep_read_csr64(oct, CNXK_SDP_EPF_OEI_RINT);
 	if (reg0) {
 		octep_write_csr64(oct, CNXK_SDP_EPF_OEI_RINT, reg0);
 		if (reg0 & CNXK_SDP_EPF_OEI_RINT_DATA_BIT_MBOX)
-			queue_work(octep_wq, &oct->ctrl_mbox_task);
+		{
+			status = atomic_load_acq_int(&oct->status);
+			if (status == OCTEP_DEV_STATUS_INIT) {
+				/* During setup, process synchronously */
+				octep_ctrl_net_recv_fw_messages(oct);
+			} else if (status == OCTEP_DEV_STATUS_READY) {
+				/* After setup, use taskqueue */
+				taskqueue_enqueue(octep_tq, &oct->ctrl_mbox_task);
+			}
+		}
 		if (reg0 & CNXK_SDP_EPF_OEI_RINT_DATA_BIT_HBEAT)
-			atomic_set(&oct->hb_miss_cnt, 0);
+			atomic_store_int(&oct->hb_miss_cnt, 0);
 
 		handled = 1;
 	}
-
 }
 
-/* OEI interrupt handler */
-static irqreturn_t octep_oei_intr_handler_cnxk_pf(void *dev)
+static void octep_oei_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
 
 	octep_poll_oei_cnxk_pf(oct);
-	return IRQ_HANDLED;
 }
 
 /* Process non-ioq interrupts required to keep pf interface running.
@@ -493,100 +456,94 @@ static void octep_poll_non_ioq_interrupts_cnxk_pf(struct octep_device *oct)
 	octep_poll_oei_cnxk_pf(oct);
 }
 
-/* Interrupt handler for input ring error interrupts. */
-static irqreturn_t octep_ire_intr_handler_cnxk_pf(void *dev)
+static int octep_ire_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 	int i = 0;
 
 	/* Check for IRERR INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_IRERR_RINT);
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "received IRERR_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,"received IRERR_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_IRERR_RINT, reg_val);
 
 		for (i = 0; i < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); i++) {
 			reg_val = octep_read_csr64(oct,
-						   CNXK_SDP_R_ERR_TYPE(i));
+									   CNXK_SDP_R_ERR_TYPE(i));
 			if (reg_val) {
-				dev_info(&pdev->dev,
-					 "Received err type on IQ-%d: 0x%llx\n",
-					 i, reg_val);
+				dev_info(oct->pdev,
+						 "Received err type on IQ-%d: 0x%lx\n",
+						 i, reg_val);
 				octep_write_csr64(oct, CNXK_SDP_R_ERR_TYPE(i),
-						  reg_val);
+								  reg_val);
 			}
 		}
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for output ring error interrupts. */
-static irqreturn_t octep_ore_intr_handler_cnxk_pf(void *dev)
+static int octep_ore_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 	int i = 0;
 
 	/* Check for ORERR INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_ORERR_RINT);
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received ORERR_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,
+				 "Received ORERR_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_ORERR_RINT, reg_val);
 		for (i = 0; i < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); i++) {
 			reg_val = octep_read_csr64(oct, CNXK_SDP_R_ERR_TYPE(i));
 			if (reg_val) {
-				dev_info(&pdev->dev,
-					 "Received err type on OQ-%d: 0x%llx\n",
-					 i, reg_val);
+				dev_info(oct->pdev,
+						 "Received err type on OQ-%d: 0x%lx\n",
+						 i, reg_val);
 				octep_write_csr64(oct, CNXK_SDP_R_ERR_TYPE(i),
-						  reg_val);
+								  reg_val);
 			}
 		}
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for vf input ring error interrupts. */
-static irqreturn_t octep_vfire_intr_handler_cnxk_pf(void *dev)
+static int octep_vfire_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 
 	/* Check for VFIRE INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_VFIRE_RINT(0));
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received VFIRE_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,
+				 "Received VFIRE_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_VFIRE_RINT(0), reg_val);
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for vf output ring error interrupts. */
-static irqreturn_t octep_vfore_intr_handler_cnxk_pf(void *dev)
+static int octep_vfore_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 
 	/* Check for VFORE INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_VFORE_RINT(0));
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received VFORE_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,
+				 "Received VFORE_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_VFORE_RINT(0), reg_val);
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for dpi dma related interrupts. */
-static irqreturn_t octep_dma_intr_handler_cnxk_pf(void *dev)
+static int octep_dma_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
 	u64 reg_val = 0;
@@ -596,91 +553,69 @@ static irqreturn_t octep_dma_intr_handler_cnxk_pf(void *dev)
 	if (reg_val) {
 		octep_write_csr64(oct, CNXK_SDP_EPF_DMA_RINT, reg_val);
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for dpi dma transaction error interrupts for VFs  */
-static irqreturn_t octep_dma_vf_intr_handler_cnxk_pf(void *dev)
+static int octep_dma_vf_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 
 	/* Check for DMA VF INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_DMA_VF_RINT(0));
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received DMA_VF_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,
+				 "Received DMA_VF_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_DMA_VF_RINT(0), reg_val);
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for pp transaction error interrupts for VFs  */
-static irqreturn_t octep_pp_vf_intr_handler_cnxk_pf(void *dev)
+static int octep_pp_vf_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 
 	/* Check for PPVF INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_PP_VF_RINT(0));
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received PP_VF_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,
+				 "Received PP_VF_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_PP_VF_RINT(0), reg_val);
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupt handler for mac related interrupts. */
-static irqreturn_t octep_misc_intr_handler_cnxk_pf(void *dev)
+static int octep_misc_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 	u64 reg_val = 0;
 
 	/* Check for MISC INTR */
 	reg_val = octep_read_csr64(oct, CNXK_SDP_EPF_MISC_RINT);
 	if (reg_val) {
-		dev_info(&pdev->dev,
-			 "Received MISC_RINT intr: 0x%llx\n", reg_val);
+		dev_info(oct->pdev,
+				 "Received MISC_RINT intr: 0x%lx\n", reg_val);
 		octep_write_csr64(oct, CNXK_SDP_EPF_MISC_RINT, reg_val);
 	}
-	return IRQ_HANDLED;
+	return FILTER_HANDLED;
 }
 
 /* Interrupts handler for all reserved interrupts. */
-static irqreturn_t octep_rsvd_intr_handler_cnxk_pf(void *dev)
+static int octep_rsvd_intr_handler_cnxk_pf(void *dev)
 {
 	struct octep_device *oct = (struct octep_device *)dev;
-	struct pci_dev *pdev = oct->pdev;
 
-	dev_info(&pdev->dev, "Reserved interrupts raised; Ignore\n");
-	return IRQ_HANDLED;
+	dev_info(oct->pdev, "Reserved interrupts raised; Ignore\n");
+	return FILTER_HANDLED;
 }
 
-/* Tx/Rx queue interrupt handler */
-static irqreturn_t octep_ioq_intr_handler_cnxk_pf(void *data)
-{
-	struct octep_ioq_vector *vector = (struct octep_ioq_vector *)data;
-	struct octep_oq *oq;
-
-	if (!vector)
-		return IRQ_HANDLED;
-	oq = vector->oq;
-
-	if (!oq || !(oq->napi))
-		return IRQ_HANDLED;
-
-	napi_schedule_irqoff(oq->napi);
-	return IRQ_HANDLED;
-}
-
-/* soft reset */
 static int octep_soft_reset_cnxk_pf(struct octep_device *oct)
 {
-	dev_info(&oct->pdev->dev, "CNXKXX: Doing soft reset\n");
+	dev_info(oct->pdev, "CNXKXX: Doing soft reset\n");
 
 	octep_write_csr64(oct, CNXK_SDP_WIN_WR_MASK_REG, 0xFF);
 
@@ -693,12 +628,12 @@ static int octep_soft_reset_cnxk_pf(struct octep_device *oct)
 	 * the module is removed.
 	 */
 	OCTEP_PCI_WIN_WRITE(oct, CNXK_PEMX_PFX_CSX_PFCFGX(0, 0, CNXK_PCIEEP_VSECST_CTL),
-			    FW_STATUS_DOWNING);
+						FW_STATUS_DOWNING);
 
 	/* Set chip domain reset bit */
 	OCTEP_PCI_WIN_WRITE(oct, CNXK_RST_CHIP_DOMAIN_W1S, 1);
 	/* Wait till Octeon resets. */
-	mdelay(10);
+	DELAY(10000); // Delay for 10 milliseconds
 	/* restore the  reset value */
 	octep_write_csr64(oct, CNXK_SDP_WIN_WR_MASK_REG, 0xFF);
 
@@ -720,8 +655,11 @@ static void octep_reinit_regs_cnxk_pf(struct octep_device *oct)
 	oct->hw_ops.enable_io_queues(oct);
 
 	for (i = 0; i < CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf); i++)
-		writel(oct->oq[i]->max_count, oct->oq[i]->pkts_credit_reg);
+		octep_write_csr(oct, oct->oq[i]->pkts_credit_reg,
+						oct->oq[i]->max_count);
+
 }
+
 
 /* Enable all interrupts */
 static void octep_enable_interrupts_cnxk_pf(struct octep_device *oct)
@@ -749,6 +687,7 @@ static void octep_enable_interrupts_cnxk_pf(struct octep_device *oct)
 	octep_write_csr64(oct, CNXK_SDP_EPF_DMA_VF_RINT_ENA_W1S(0), -1ULL);
 	octep_write_csr64(oct, CNXK_SDP_EPF_PP_VF_RINT_ENA_W1S(0), -1ULL);
 }
+
 
 /* Disable all interrupts */
 static void octep_disable_interrupts_cnxk_pf(struct octep_device *oct)
@@ -788,28 +727,25 @@ static void octep_disable_interrupts_cnxk_pf(struct octep_device *oct)
 /* Get new Octeon Read Index: index of descriptor that Octeon reads next. */
 static u32 octep_update_iq_read_index_cnxk_pf(struct octep_iq *iq)
 {
-	u32 pkt_in_done = readl(iq->inst_cnt_reg);
+	struct octep_device *oct = iq->oct_dev;
+	u32 pkt_in_done = octep_read_csr(oct, iq->inst_cnt_reg);
 	u32 last_done, new_idx;
 
 	if (unlikely(pkt_in_done == 0xFFFFFFFF)) {
 		last_done = 0;
-		if (printk_ratelimit()) {
-			dev_err(iq->dev, "IQ-%u count read failure\n", iq->q_no);
-		}
+		iq->pkt_in_done = pkt_in_done;
 	} else {
 		last_done = pkt_in_done - iq->pkt_in_done;
 		iq->pkt_in_done = pkt_in_done;
 	}
 
 	new_idx = (iq->octep_read_index + last_done) % iq->max_count;
-
 	return new_idx;
 }
-
 /* Enable a hardware Tx Queue */
 static void octep_enable_iq_cnxk_pf(struct octep_device *oct, int iq_no)
 {
-	u64 loop = HZ;
+	u64 loop = hz;
 	u64 reg_val;
 
 	iq_no += CFG_GET_PORTS_PF_SRN(oct->conf);
@@ -817,8 +753,8 @@ static void octep_enable_iq_cnxk_pf(struct octep_device *oct, int iq_no)
 	octep_write_csr64(oct, CNXK_SDP_R_IN_INSTR_DBELL(iq_no), 0xFFFFFFFF);
 
 	while (octep_read_csr64(oct, CNXK_SDP_R_IN_INSTR_DBELL(iq_no)) &&
-	       loop--) {
-		schedule_timeout_interruptible(1);
+		   loop--) {
+		pause("pause", 1);
 	}
 
 	reg_val = octep_read_csr64(oct,  CNXK_SDP_R_IN_INT_LEVELS(iq_no));
@@ -893,18 +829,6 @@ static void octep_disable_io_queues_cnxk_pf(struct octep_device *oct)
 	}
 }
 
-/* Dump hardware registers (including Tx/Rx queues) for debugging. */
-static void octep_dump_registers_cnxk_pf(struct octep_device *oct)
-{
-	u8 srn, num_rings, q;
-
-	srn = CFG_GET_PORTS_PF_SRN(oct->conf);
-	num_rings = CFG_GET_PORTS_ACTIVE_IO_RINGS(oct->conf);
-
-	for (q = srn; q < srn + num_rings; q++)
-		cnxk_dump_regs(oct, q);
-}
-
 /**
  * octep_device_setup_cnxk_pf() - Setup Octeon device.
  *
@@ -933,7 +857,6 @@ void octep_device_setup_cnxk_pf(struct octep_device *oct)
 	oct->hw_ops.pp_vf_intr_handler = octep_pp_vf_intr_handler_cnxk_pf;
 	oct->hw_ops.misc_intr_handler = octep_misc_intr_handler_cnxk_pf;
 	oct->hw_ops.rsvd_intr_handler = octep_rsvd_intr_handler_cnxk_pf;
-	oct->hw_ops.ioq_intr_handler = octep_ioq_intr_handler_cnxk_pf;
 	oct->hw_ops.soft_reset = octep_soft_reset_cnxk_pf;
 	oct->hw_ops.reinit_regs = octep_reinit_regs_cnxk_pf;
 
@@ -952,13 +875,10 @@ void octep_device_setup_cnxk_pf(struct octep_device *oct)
 	oct->hw_ops.disable_io_queues = octep_disable_io_queues_cnxk_pf;
 	oct->hw_ops.reset_io_queues = octep_reset_io_queues_cnxk_pf;
 
-	oct->hw_ops.dump_registers = octep_dump_registers_cnxk_pf;
-
 	octep_setup_pci_window_regs_cnxk_pf(oct);
 
 	oct->pcie_port = octep_read_csr64(oct, CNXK_SDP_MAC_NUMBER) & 0xff;
-	dev_info(&oct->pdev->dev,
-		 "Octeon device using PCIE Port %d\n", oct->pcie_port);
+	dev_info(oct->pdev,"Octeon device using PCIE Port %d\n", oct->pcie_port);
 
 	octep_init_config_cnxk_pf(oct);
 	octep_configure_ring_mapping_cnxk_pf(oct);
@@ -969,5 +889,5 @@ void octep_device_setup_cnxk_pf(struct octep_device *oct)
 	 * leave it in a state that is not READY (1).
 	 */
 	OCTEP_PCI_WIN_WRITE(oct, CNXK_PEMX_PFX_CSX_PFCFGX(0, 0, CNXK_PCIEEP_VSECST_CTL),
-			     FW_STATUS_RUNNING);
+						FW_STATUS_RUNNING);
 }

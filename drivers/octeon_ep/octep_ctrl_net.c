@@ -1,22 +1,46 @@
-// SPDX-License-Identifier: GPL-2.0
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <linux/string.h>
-#include <linux/types.h>
-#include <linux/etherdevice.h>
-#include <linux/pci.h>
-#include <linux/wait.h>
 
-#include "octep_config.h"
+#include "octep_bsd.h"
 #include "octep_main.h"
-#include "octep_ctrl_net.h"
+#include "octep_config.h"
+#include "octep_regs_cnxk_pf.h"
 #include "octep_pfvf_mbox.h"
+#include "octep_ctrl_net.h"
 
 /* Control plane version */
-#define OCTEP_CP_VERSION_CURRENT	OCTEP_CP_VERSION(1, 0, 0)
+#define OCTEP_CP_VERSION_CURRENT    OCTEP_CP_VERSION(1, 0, 0)
+#define GENMASK(h, l) (((~0U) << (l)) & (~0U >> (sizeof(unsigned int) * 8 - 1 - (h))))
 
 static const u32 req_hdr_sz = sizeof(union octep_ctrl_net_req_hdr);
 static const u32 mtu_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mtu);
@@ -24,14 +48,14 @@ static const u32 mac_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_mac);
 static const u32 state_sz = sizeof(struct octep_ctrl_net_h2f_req_cmd_state);
 static const u32 link_info_sz = sizeof(struct octep_ctrl_net_link_info);
 static const u32 offloads_sz = sizeof(struct octep_ctrl_net_offloads);
-static atomic_t ctrl_net_msg_id;
+static volatile int ctrl_net_msg_id;
 
 static void init_send_req(struct octep_ctrl_mbox_msg *msg, void *buf,
 			  u16 sz, int vfid)
 {
 	msg->hdr.s.flags = OCTEP_CTRL_MBOX_MSG_HDR_FLAG_REQ;
-	msg->hdr.s.msg_id = atomic_inc_return(&ctrl_net_msg_id) &
-			    GENMASK(sizeof(msg->hdr.s.msg_id) * BITS_PER_BYTE, 0);
+	msg->hdr.s.msg_id = atomic_fetchadd_int(&ctrl_net_msg_id, 1) &
+		GENMASK(sizeof(msg->hdr.s.msg_id) * NBBY, 0);
 	msg->hdr.s.sz = req_hdr_sz + sz;
 	msg->sg_num = 1;
 	msg->sg_list[0].msg = buf;
@@ -42,19 +66,19 @@ static void init_send_req(struct octep_ctrl_mbox_msg *msg, void *buf,
 	}
 }
 
-static int send_mbox_req(struct octep_device *oct,
-			 struct octep_ctrl_net_wait_data *d,
-			 bool wait_for_response)
+static int
+send_mbox_req(struct octep_device *oct,
+	      struct octep_ctrl_net_wait_data *d,
+	      bool wait_for_response)
 {
 	int err, ret, cmd;
 
-	/* check if firmware is compatible for this request */
 	cmd = d->data.req.hdr.s.cmd;
 	if (octep_ctrl_net_h2f_cmd_versions[cmd] > oct->ctrl_mbox.max_fw_version ||
 	    octep_ctrl_net_h2f_cmd_versions[cmd] < oct->ctrl_mbox.min_fw_version)
 		return -EOPNOTSUPP;
 
-	err = octep_ctrl_mbox_send(&oct->ctrl_mbox, &d->msg);
+	err = octep_ctrl_mbox_send((void *)oct, &oct->ctrl_mbox, &d->msg);
 	if (err < 0)
 		return err;
 
@@ -62,25 +86,27 @@ static int send_mbox_req(struct octep_device *oct,
 		return 0;
 
 	d->done = 0;
-	INIT_LIST_HEAD(&d->list);
-	mutex_lock(&oct->ctrl_mbox.list_lock);
-	list_add_tail(&d->list, &oct->ctrl_req_wait_list);
-	mutex_unlock(&oct->ctrl_mbox.list_lock);
-	ret = wait_event_interruptible_timeout(oct->ctrl_req_wait_q,
-					       (d->done != 0),
-					       msecs_to_jiffies(8000));
-	mutex_lock(&oct->ctrl_mbox.list_lock);
-	list_del(&d->list);
-	mutex_unlock(&oct->ctrl_mbox.list_lock);
-	if (ret == 0 || ret == 1)
-		return -EAGAIN;
+	mutex_lock(&oct->ctrl_req_mtx);
+	TAILQ_INSERT_TAIL(&oct->ctrl_req_wait_list, d, list);
 
-	/**
-	 * (ret == 0)  cond = false && timeout, return 0
-	 * (ret < 0) interrupted by signal, return 0
-	 * (ret == 1) cond = true && timeout, return 1
-	 * (ret >= 1) cond = true && !timeout, return 1
-	 */
+	ret = cv_timedwait(&oct->ctrl_req_cv, &oct->ctrl_req_mtx, (2000 * hz) / 1000);
+
+	TAILQ_REMOVE(&oct->ctrl_req_wait_list, d, list);
+	mutex_unlock(&oct->ctrl_req_mtx);
+
+	if (ret != 0)
+	{
+		if (ret == -EINTR)
+		{
+			return -EINTR;
+		}
+		return -EAGAIN;
+	}
+
+	if (d->done == 0) {
+		dev_info(oct->pdev, "%s: signaled but done=0, potential bug\n", __func__);
+		return -EAGAIN;
+	}
 
 	if (d->data.resp.hdr.s.reply != OCTEP_CTRL_NET_REPLY_OK)
 		return -EAGAIN;
@@ -97,37 +123,48 @@ static int validate_fw_version(struct octep_ctrl_mbox *ctrl_mbox)
 	return 0;
 }
 
-int octep_ctrl_net_init(struct octep_device *oct)
+int
+octep_ctrl_net_init(struct octep_device *oct)
 {
-	struct pci_dev *pdev = oct->pdev;
+	device_t pdev = oct->pdev;
 	struct octep_ctrl_mbox *ctrl_mbox;
 	int ret;
 
-	init_waitqueue_head(&oct->ctrl_req_wait_q);
-	INIT_LIST_HEAD(&oct->ctrl_req_wait_list);
+	/* Initialize mutex and condition variable */
+	mutex_init(&oct->ctrl_req_mtx, "ctrl_req_mtx", NULL, MTX_DEF);
+	cv_init(&oct->ctrl_req_cv, "ctrl_req_cv");
+
+	/* Initialize the wait list */
+	TAILQ_INIT(&oct->ctrl_req_wait_list);
 
 	/* Initialize control mbox */
 	ctrl_mbox = &oct->ctrl_mbox;
 	ctrl_mbox->version = OCTEP_CP_VERSION_CURRENT;
 	ctrl_mbox->barmem = CFG_GET_CTRL_MBOX_MEM_ADDR(oct->conf);
-	ret = octep_ctrl_mbox_init(ctrl_mbox);
+	ret = octep_ctrl_mbox_init((void *)oct, ctrl_mbox);
 	if (ret) {
-		dev_err(&pdev->dev, "Failed to initialize control mbox\n");
-		return ret;
+		dev_err(pdev, "Failed to initialize control mbox\n");
+		goto init_fail;
 	}
 
-	dev_info(&pdev->dev, "Control plane versions host: %llx, firmware: %x:%x\n",
-		 ctrl_mbox->version, ctrl_mbox->min_fw_version,
-		 ctrl_mbox->max_fw_version);
+	dev_info(pdev, "Control plane versions host: %llx, firmware: %x:%x\n",
+		 (unsigned long long)ctrl_mbox->version,
+		 ctrl_mbox->min_fw_version, ctrl_mbox->max_fw_version);
 	ret = validate_fw_version(ctrl_mbox);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "Control plane version mismatch\n");
-		octep_ctrl_mbox_uninit(ctrl_mbox);
-		return -EINVAL;
+		dev_err(pdev, "Control plane version mismatch\n");
+		octep_ctrl_mbox_uninit( (void *)oct, ctrl_mbox);
+		ret = -EINVAL;
+		goto init_fail;
 	}
 	oct->ctrl_mbox_ifstats_offset = ctrl_mbox->barmem_sz;
 
 	return 0;
+
+init_fail:
+	cv_destroy(&oct->ctrl_req_cv);
+	mutex_destroy(&oct->ctrl_req_mtx);
+	return ret;
 }
 
 int octep_ctrl_net_get_link_status(struct octep_device *oct, int vfid)
@@ -156,7 +193,7 @@ int octep_ctrl_net_set_link_status(struct octep_device *oct, int vfid, bool up,
 	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_LINK_STATUS;
 	req->link.cmd = OCTEP_CTRL_NET_CMD_SET;
 	req->link.state = (up) ? OCTEP_CTRL_NET_STATE_UP :
-				OCTEP_CTRL_NET_STATE_DOWN;
+		OCTEP_CTRL_NET_STATE_DOWN;
 
 	return send_mbox_req(oct, &d, wait_for_response);
 }
@@ -171,7 +208,7 @@ int octep_ctrl_net_set_rx_state(struct octep_device *oct, int vfid, bool up,
 	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_RX_STATE;
 	req->link.cmd = OCTEP_CTRL_NET_CMD_SET;
 	req->link.state = (up) ? OCTEP_CTRL_NET_STATE_UP :
-				OCTEP_CTRL_NET_STATE_DOWN;
+		OCTEP_CTRL_NET_STATE_DOWN;
 
 	return send_mbox_req(oct, &d, wait_for_response);
 }
@@ -185,11 +222,12 @@ int octep_ctrl_net_get_mac_addr(struct octep_device *oct, int vfid, u8 *addr)
 	init_send_req(&d.msg, req, mac_sz, vfid);
 	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_MAC;
 	req->link.cmd = OCTEP_CTRL_NET_CMD_GET;
+
 	err = send_mbox_req(oct, &d, true);
 	if (err < 0)
 		return err;
 
-	memcpy(addr, d.data.resp.mac.addr, ETH_ALEN);
+	memcpy(addr, d.data.resp.mac.addr, ETHER_ADDR_LEN);
 
 	return 0;
 }
@@ -203,10 +241,11 @@ int octep_ctrl_net_set_mac_addr(struct octep_device *oct, int vfid, u8 *addr,
 	init_send_req(&d.msg, req, mac_sz, vfid);
 	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_MAC;
 	req->mac.cmd = OCTEP_CTRL_NET_CMD_SET;
-	memcpy(&req->mac.addr, addr, ETH_ALEN);
+	memcpy(&req->mac.addr, addr, ETHER_ADDR_LEN);
 
 	return send_mbox_req(oct, &d, wait_for_response);
 }
+
 
 int octep_ctrl_net_get_mtu(struct octep_device *oct, int vfid)
 {
@@ -261,9 +300,9 @@ int octep_ctrl_net_get_if_stats(struct octep_device *oct, int vfid,
 	memcpy(tx_stats,
 	       &resp->if_stats.tx_stats,
 	       sizeof(struct octep_iface_tx_stats));
-
 	return 0;
 }
+
 
 int octep_ctrl_net_get_link_info(struct octep_device *oct, int vfid,
 				 struct octep_iface_link_info *link_info)
@@ -314,23 +353,23 @@ static int process_mbox_req(struct octep_device *oct,
 	return 0;
 }
 
-static int process_mbox_resp(struct octep_device *oct,
-			     struct octep_ctrl_mbox_msg *msg)
+
+
+static int
+process_mbox_resp(struct octep_device *oct, struct octep_ctrl_mbox_msg *msg)
 {
 	struct octep_ctrl_net_wait_data *pos, *n;
 
-	mutex_lock(&oct->ctrl_mbox.list_lock);
-	list_for_each_entry_safe(pos, n, &oct->ctrl_req_wait_list, list) {
+	mutex_lock(&oct->ctrl_req_mtx);
+	TAILQ_FOREACH_SAFE(pos, &oct->ctrl_req_wait_list, list, n) {
 		if (pos->msg.hdr.s.msg_id == msg->hdr.s.msg_id) {
-			memcpy(&pos->data.resp,
-			       msg->sg_list[0].msg,
-			       msg->hdr.s.sz);
+			memcpy(&pos->data.resp, msg->sg_list[0].msg, msg->hdr.s.sz);
 			pos->done = 1;
-			wake_up_interruptible_all(&oct->ctrl_req_wait_q);
+			cv_broadcast(&oct->ctrl_req_cv); /* Wake all waiters */
 			break;
 		}
 	}
-	mutex_unlock(&oct->ctrl_mbox.list_lock);
+	mutex_unlock(&oct->ctrl_req_mtx);
 
 	return 0;
 }
@@ -338,7 +377,6 @@ static int process_mbox_resp(struct octep_device *oct,
 static int process_mbox_notify(struct octep_device *oct,
 			       struct octep_ctrl_mbox_msg *msg)
 {
-	struct net_device *netdev = oct->netdev;
 	struct octep_ctrl_net_f2h_req *req;
 	int cmd;
 
@@ -357,18 +395,22 @@ static int process_mbox_notify(struct octep_device *oct,
 
 	switch (cmd) {
 	case OCTEP_CTRL_NET_F2H_CMD_LINK_STATUS:
+
+#if 0
 		if (netif_running(netdev)) {
 			if (req->link.state) {
-				dev_info(&oct->pdev->dev, "netif_carrier_on\n");
+				octep_dev_info(oct, "netif_carrier_on\n");
+
 				netif_carrier_on(netdev);
 			} else {
 				dev_info(&oct->pdev->dev, "netif_carrier_off\n");
 				netif_carrier_off(netdev);
 			}
 		}
+#endif
 		break;
 	default:
-		pr_err("Unknown mbox req : %u\n", req->hdr.s.cmd);
+		dev_err(oct->pdev,"Unknown mbox req : %u\n", req->hdr.s.cmd);
 		break;
 	}
 
@@ -389,7 +431,7 @@ int octep_ctrl_net_recv_fw_messages(struct octep_device *oct)
 	while (true) {
 		/* mbox will overwrite msg.hdr.s.sz so initialize it */
 		msg.hdr.s.sz = msg_sz;
-		ret = octep_ctrl_mbox_recv(&oct->ctrl_mbox, (struct octep_ctrl_mbox_msg *)&msg);
+		ret = octep_ctrl_mbox_recv((void *)oct, &oct->ctrl_mbox, (struct octep_ctrl_mbox_msg *)&msg);
 		if (ret < 0)
 			break;
 
@@ -430,7 +472,7 @@ int octep_ctrl_net_dev_remove(struct octep_device *oct, int vfid)
 	struct octep_ctrl_net_wait_data d = {0};
 	struct octep_ctrl_net_h2f_req *req = &d.data.req;
 
-	dev_info(&oct->pdev->dev, "Sending dev_unload msg to fw\n");
+	dev_info(oct->pdev, "Sending dev_unload msg to fw\n");
 	init_send_req(&d.msg, req, sizeof(int), vfid);
 	req->hdr.s.cmd = OCTEP_CTRL_NET_H2F_CMD_DEV_REMOVE;
 
@@ -452,20 +494,23 @@ int octep_ctrl_net_set_offloads(struct octep_device *oct, int vfid,
 	return send_mbox_req(oct, &d, wait_for_response);
 }
 
-int octep_ctrl_net_uninit(struct octep_device *oct)
+int
+octep_ctrl_net_uninit(struct octep_device *oct)
 {
 	struct octep_ctrl_net_wait_data *pos, *n;
 
 	octep_ctrl_net_dev_remove(oct, OCTEP_CTRL_NET_INVALID_VFID);
 
-	mutex_lock(&oct->ctrl_mbox.list_lock);
-	list_for_each_entry_safe(pos, n, &oct->ctrl_req_wait_list, list)
+	mutex_lock(&oct->ctrl_req_mtx);
+	TAILQ_FOREACH_SAFE(pos, &oct->ctrl_req_wait_list, list, n) {
 		pos->done = 1;
-	mutex_unlock(&oct->ctrl_mbox.list_lock);
+	}
+	cv_broadcast(&oct->ctrl_req_cv); /* Wake all waiters */
+	mutex_unlock(&oct->ctrl_req_mtx);
 
-	wake_up_interruptible_all(&oct->ctrl_req_wait_q);
-
-	octep_ctrl_mbox_uninit(&oct->ctrl_mbox);
+	octep_ctrl_mbox_uninit((void *)oct, &oct->ctrl_mbox);
+	mutex_destroy(&oct->ctrl_req_mtx);
+	cv_destroy(&oct->ctrl_req_cv);
 
 	return 0;
 }

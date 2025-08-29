@@ -1,13 +1,46 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Marvell Octeon EP (EndPoint) Ethernet Driver
+/*
+ *   BSD LICENSE
  *
- * Copyright (C) 2020 Marvell.
+ *   Copyright(c) 2025  Marvell Octeon EP (EndPoint) Ethernet Driver..
+ *   All rights reserved.
  *
+ *   Redistribution and use in source and binary forms, with or without
+ *   modification, are permitted provided that the following conditions
+ *   are met:
+ *
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in
+ *       the documentation and/or other materials provided with the
+ *       distribution.
+ *     * Neither the name of Marvell, Inc. nor the names of its
+ *       contributors may be used to endorse or promote products derived
+ *       from this software without specific prior written permission.
+ *
+ *   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ *   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ *   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ *   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ *   OWNER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ *   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ *   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ *   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #ifndef __OCTEP_CTRL_NET_H__
 #define __OCTEP_CTRL_NET_H__
 
-#include "octep_cp_version.h"
+#include "octep_rx.h"
+#include "octep_tx.h"
+#include "octep_ctrl_mbox.h"
+
+#define OCTEP_CP_VERSION(a, b, c)       (((a & 0xff) << 16) + \
+					 ((b & 0xff) << 8) + \
+					 (c & 0xff))
+
 
 #define OCTEP_CTRL_NET_INVALID_VFID	(-1)
 
@@ -96,7 +129,7 @@ struct octep_ctrl_net_h2f_req_cmd_mac {
 	/* enum octep_ctrl_net_cmd */
 	u16 cmd;
 	/* xx:xx:xx:xx:xx:xx */
-	u8 addr[ETH_ALEN];
+	u8 addr[ETHER_ADDR_LEN];
 };
 
 /* get/set link state, rx state */
@@ -185,7 +218,7 @@ struct octep_ctrl_net_h2f_resp_cmd_mtu {
 /* get mac response */
 struct octep_ctrl_net_h2f_resp_cmd_mac {
 	/* xx:xx:xx:xx:xx:xx */
-	u8 addr[ETH_ALEN];
+	u8 addr[ETHER_ADDR_LEN];
 };
 
 /* get if_stats, xstats, q_stats request */
@@ -248,7 +281,7 @@ union octep_ctrl_net_max_data {
 };
 
 struct octep_ctrl_net_wait_data {
-	struct list_head list;
+	TAILQ_ENTRY(octep_ctrl_net_wait_data) list;
 	int done;
 	struct octep_ctrl_mbox_msg msg;
 	union {
@@ -365,6 +398,7 @@ int octep_ctrl_net_get_if_stats(struct octep_device *oct, int vfid,
 int octep_ctrl_net_get_link_info(struct octep_device *oct, int vfid,
 				 struct octep_iface_link_info *link_info);
 
+
 /** Set link info in firmware.
  *
  * @param oct: non-null pointer to struct octep_device.
@@ -379,31 +413,6 @@ int octep_ctrl_net_set_link_info(struct octep_device *oct,
 				 struct octep_iface_link_info *link_info,
 				 bool wait_for_response);
 
-/** Poll for firmware messages and process them.
- *
- * @param oct: non-null pointer to struct octep_device.
- */
-int octep_ctrl_net_recv_fw_messages(struct octep_device *oct);
-
-/** Get info from firmware.
- *
- * @param oct: non-null pointer to struct octep_device.
- * @param vfid: Index of virtual function.
- * @param info: non-null pointer to struct octep_fw_info.
- *
- * return value: 0 on success, -errno on failure.
- */
-int octep_ctrl_net_get_info(struct octep_device *oct, int vfid,
-			    struct octep_fw_info *info);
-
-/** Indicate to firmware that a device unload has happened
- *
- * @param oct: non-null pointer to struct octep_device.
- * @param vfid: Index of virtual function.
- *
- * return value: 0 on success, -errno on failure.
- */
-int octep_ctrl_net_dev_remove(struct octep_device *oct, int vfid);
 
 /** Set offloads in firmware.
  *
@@ -418,6 +427,25 @@ int octep_ctrl_net_set_offloads(struct octep_device *oct, int vfid,
 				struct octep_ctrl_net_offloads *offloads,
 				bool wait_for_response);
 
+
+/** Poll for firmware messages and process them.
+ *
+ * @param oct: non-null pointer to struct octep_device.
+ */
+int octep_ctrl_net_recv_fw_messages(struct octep_device *oct);
+
+
+/** Get info from firmware.
+ *
+ * @param oct: non-null pointer to struct octep_device.
+ * @param vfid: Index of virtual function.
+ * @param info: non-null pointer to struct octep_fw_info.
+ *
+ * return value: 0 on success, -errno on failure.
+ */
+int octep_ctrl_net_get_info(struct octep_device *oct, int vfid,
+			    struct octep_fw_info *info);
+
 /** Uninitialize data for ctrl net.
  *
  * @param oct: non-null pointer to struct octep_device.
@@ -425,5 +453,14 @@ int octep_ctrl_net_set_offloads(struct octep_device *oct, int vfid,
  * return value: 0 on success, -errno on error.
  */
 int octep_ctrl_net_uninit(struct octep_device *oct);
+
+/** Indicate to firmware that a device unload has happened
+ *
+ * @param oct: non-null pointer to struct octep_device.
+ * @param vfid: Index of virtual function.
+ *
+ * return value: 0 on success, -errno on failure.
+ */
+int octep_ctrl_net_dev_remove(struct octep_device *oct, int vfid);
 
 #endif /* __OCTEP_CTRL_NET_H__ */
