@@ -155,8 +155,8 @@ struct octboot_net_dev {
 	uint32_t *rq_cons_shdw_vaddr;
 	uint64_t rq_cons_shdw_dma;
 	struct mutex mbox_lock;
-	uint32_t send_mbox_id;
-	uint32_t recv_mbox_id;
+	uint8_t send_mbox_id;
+	uint8_t recv_mbox_id;
 	int      octboot_net_restart;
 	uint8_t hw_addr[ETH_ALEN];
 	unsigned long task_status;
@@ -574,6 +574,9 @@ static void mbox_send_msg(struct octboot_net_dev *mdev,
 
 	mutex_lock(&mdev->mbox_lock);
 	mdev->send_mbox_id++;
+	/* Ensure ID is never 0 (uint8_t wraps automatically at 256) */
+	if (mdev->send_mbox_id == 0)
+		mdev->send_mbox_id = 1;
 	msg->s.hdr.id = mdev->send_mbox_id;
 	id = msg->s.hdr.id;
 	for (i = 1; i <= msg->s.hdr.sizew; i++)
