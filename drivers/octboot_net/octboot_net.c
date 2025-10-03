@@ -634,6 +634,8 @@ static int mbox_check_msg_rcvd(struct octboot_net_dev *mdev,
 		netdev_info(mdev->ndev, "Async or Sync reset of Octeon device\n");
 		mutex_unlock(&mdev->mbox_lock);
 		mdev->octboot_net_restart = true;
+		/* clear receive index because target will reset and start from id=1 */
+		mdev->recv_mbox_id = 0;
 		/* set netdevice down */
 		mdev->ndev->flags &= ~(IFF_RUNNING);
 		change_host_status(mdev, OCTNET_HOST_GOING_DOWN, false);
