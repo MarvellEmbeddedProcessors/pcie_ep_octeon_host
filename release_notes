@@ -13,6 +13,9 @@ Known Issues
 
 Change Logs
 -----------
+v26.01
+~~~~~~~~~~~~~~
+- phc: use .adjfine handler for kernel versions above 5.15.0
 
 v25.11
 ~~~~~~~~~~~~~~
