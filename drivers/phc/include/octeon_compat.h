@@ -1,3 +1,6 @@
+#ifndef _OCTEON_COMPAT_H_
+#define _OCTEON_COMPAT_H_
+
 #include "linux/version.h"
 
 #if defined(RHEL_RELEASE_CODE)
@@ -12,8 +15,11 @@
 #if (RHEL_RELEASE_VERSION(9, 0) <= RHEL_RELEASE_CODE)
 #define NO_ADJ_FREQ_HANDLER
 #endif
-#endif
+#else
 
-#if (KERNEL_VERSION(6, 2, 0) <= LINUX_VERSION_CODE)
+#if (KERNEL_VERSION(5, 15, 0) <= LINUX_VERSION_CODE)
 #define NO_ADJ_FREQ_HANDLER
 #endif
+#endif
+
+#endif /* _OCTEON_COMPAT_H_ */
